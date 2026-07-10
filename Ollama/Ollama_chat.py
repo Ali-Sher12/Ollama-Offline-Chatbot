@@ -1,5 +1,11 @@
 import ollama
-import os
+from pydantic import BaseModel #for structuring
+import Reading_Scripts.load_csv
+import Reading_Scripts.load_docx
+import Reading_Scripts.load_pdf
+import Reading_Scripts.load_pptx
+import Reading_Scripts.load_xlsx
+import Reading_Scripts.load_txt
 
 myModels = ollama.list()
 aliveTimes = ['10m','30m','45m','60m',-1]
@@ -13,11 +19,12 @@ if __name__ == "__main__":
         print(i," : ",m.model,)
     selected_model_index = int(input("Select your desired model[1-10] : "))
     #getting word by word progress
+    print("\n")
     i=0    
     for time_ in aliveTimes:
         i+=1
         print(i," : ",time_,)
-    alive_index = int(input("Select your desired time[1-4] : "))
+    alive_index = int(input("Select your desired time[1-4] (-1 means no time limit): "))
 
     while True:
         user_msg = input("\n\nUser: ")
