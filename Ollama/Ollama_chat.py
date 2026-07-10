@@ -9,7 +9,7 @@ import Assisting_Scripts.load_file as file_loader
 
 
 myModels = ollama.list()
-aliveTimes = ['10m','30m','45m','60m',-1]
+aliveTimes = ['5m','10m','30m','45m','60m',-1]
 myMessages = []
 rememberPrevDescisions = False
 outputToFile = False

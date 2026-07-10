@@ -7,6 +7,8 @@ myModels = [
     "llama3.1:8b",
     "phi3",
     "phi3:mini",
+    "qwen2.5:3b-instruct",
+    "dolphin-mistral",
     "qwen2.5-coder:7b",
     "gemma3",
     "gemma4:e2b",
