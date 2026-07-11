@@ -25,3 +25,5 @@ if __name__ == "__main__":
         for progress in ollama.pull(myModels[num-1], stream=True):
             print(progress)
         print("\nModel ",myModels[num-1]," Successfully Downloaded.\n")
+
+input("\nPress Enter to continue...")

@@ -100,3 +100,4 @@ if __name__ == "__main__":
 
     print(Style.RESET_ALL)
 
+input("\nPress Enter to continue...")
