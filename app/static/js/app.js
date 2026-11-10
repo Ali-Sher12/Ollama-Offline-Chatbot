@@ -297,7 +297,12 @@
       // Delete button
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'icon-btn-sm';
-      deleteBtn.innerHTML = '🗑';
+      deleteBtn.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+      `;
       deleteBtn.title = 'Delete Chat';
       deleteBtn.onclick = (e) => {
         e.stopPropagation();
@@ -388,16 +393,16 @@
         </p>
         <div class="quick-prompts-grid">
           <div class="quick-prompt-card" onclick="window.usePrompt('Summarize the key differences between Ollama models and online APIs.')">
-            🤖 Compare local vs online models
+            Compare local vs online models
           </div>
           <div class="quick-prompt-card" onclick="window.usePrompt('Help me write a Python script for asynchronous file processing.')">
-            💻 Write a fast async Python script
+            Write a fast async Python script
           </div>
           <div class="quick-prompt-card" onclick="window.usePrompt('What are recent advances in local open-source LLMs?')">
-            🌐 Search web for recent open LLM trends
+            Search web for recent open LLM trends
           </div>
           <div class="quick-prompt-card" onclick="window.usePrompt('Explain how Retrieval-Augmented Generation (RAG) works in simple terms.')">
-            📚 Explain RAG & Document Search
+            Explain RAG & Document Search
           </div>
         </div>
       `;
@@ -446,7 +451,7 @@
       meta.attachments.forEach((a) => {
         const chip = document.createElement('div');
         chip.className = 'attachment-chip';
-        chip.innerHTML = `📄 <strong>${a.filename}</strong> (${a.size_str || ''})`;
+        chip.innerHTML = `<strong>${a.filename}</strong> (${a.size_str || ''})`;
         attTray.appendChild(chip);
       });
       bubble.appendChild(attTray);
@@ -456,7 +461,7 @@
     if (meta.searchResults && meta.searchResults.length > 0) {
       const srCard = document.createElement('div');
       srCard.className = 'search-citations';
-      let citationsHtml = `<div class="citation-header">🌐 Web Search Citations:</div>`;
+      let citationsHtml = `<div class="citation-header">Web Search Citations:</div>`;
       meta.searchResults.forEach((r, idx) => {
         citationsHtml += `<div>[${idx + 1}] <a class="citation-link" href="${r.url}" target="_blank">${r.title}</a></div>`;
       });
@@ -475,8 +480,8 @@
       metaDiv.className = 'bubble-meta';
       const tokSec = meta.durationSec > 0 ? (meta.completionTokens / meta.durationSec).toFixed(1) : 0;
       metaDiv.innerHTML = `
-        <span>⚡ ${meta.durationSec || 0}s (${tokSec} tok/s)</span>
-        <span>•</span>
+        <span>${meta.durationSec || 0}s (${tokSec} tok/s)</span>
+        <span>&bull;</span>
         <span>${meta.promptTokens || 0} in / ${meta.completionTokens || 0} out</span>
       `;
       bubble.appendChild(metaDiv);
@@ -533,8 +538,8 @@
       const chip = document.createElement('div');
       chip.className = 'attachment-chip';
       chip.innerHTML = `
-        <span>📎 ${file.filename} (${file.size_str})</span>
-        <button class="remove-chip-btn" title="Remove attachment">✕</button>
+        <span>${file.filename} (${file.size_str})</span>
+        <button class="remove-chip-btn" title="Remove attachment">&times;</button>
       `;
       chip.querySelector('.remove-chip-btn').addEventListener('click', () => {
         attachedFiles.splice(index, 1);
@@ -582,7 +587,7 @@
 
     // Update generating state
     isGenerating = true;
-    btnSendMessage.innerHTML = '■';
+    btnSendMessage.innerHTML = 'Stop';
     btnSendMessage.title = 'Stop generating';
 
     activeAbortController = new AbortController();
@@ -621,7 +626,7 @@
             if (event.type === 'search_results') {
               const srCard = document.createElement('div');
               srCard.className = 'search-citations';
-              let citationsHtml = `<div class="citation-header">🌐 Web Search Citations:</div>`;
+              let citationsHtml = `<div class="citation-header">Web Search Citations:</div>`;
               event.results.forEach((r, idx) => {
                 citationsHtml += `<div>[${idx + 1}] <a class="citation-link" href="${r.url}" target="_blank">${r.title}</a></div>`;
               });
@@ -640,17 +645,17 @@
               const metaDiv = document.createElement('div');
               metaDiv.className = 'bubble-meta';
               metaDiv.innerHTML = `
-                <span>⚡ ${event.duration_sec}s (${event.tokens_per_sec} tok/s)</span>
-                <span>•</span>
+                <span>${event.duration_sec}s (${event.tokens_per_sec} tok/s)</span>
+                <span>&bull;</span>
                 <span>${event.prompt_tokens} in / ${event.completion_tokens} out</span>
-                ${event.estimated_cost > 0 ? `<span>• $${event.estimated_cost.toFixed(4)}</span>` : ''}
+                ${event.estimated_cost > 0 ? `<span>&bull; $${event.estimated_cost.toFixed(4)}</span>` : ''}
               `;
               botBubble.appendChild(metaDiv);
 
               // Update active conversation title in sidebar if updated
               fetchConversations();
             } else if (event.type === 'error') {
-              botContentDiv.innerHTML += `<div style="color: #f87171; margin-top: 8px;">⚠️ ${event.error}</div>`;
+              botContentDiv.innerHTML += `<div style="color: #f87171; margin-top: 8px;">Error: ${event.error}</div>`;
             }
           } catch (pe) {
             console.warn('SSE parse error:', pe);
@@ -659,7 +664,7 @@
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
-        botContentDiv.innerHTML += `<div style="color: #f87171; margin-top: 8px;">⚠️ Request failed: ${err.message}</div>`;
+        botContentDiv.innerHTML += `<div style="color: #f87171; margin-top: 8px;">Request failed: ${err.message}</div>`;
       }
     } finally {
       isGenerating = false;
