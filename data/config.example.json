@@ -1,0 +1,24 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "selected_provider": "ollama",
+  "selected_model": "llama3.2:1b",
+  "web_search_enabled": false,
+  "token_budget_limit": 100000,
+  "remember_context": true,
+  "export_docx": false,
+  "keep_alive": "30m",
+  "api_keys": {
+    "openai": "",
+    "anthropic": "",
+    "gemini": "",
+    "groq": "",
+    "openrouter": ""
+  },
+  "custom_endpoints": {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta",
+    "groq": "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1"
+  }
+}

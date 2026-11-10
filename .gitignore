@@ -32,6 +32,8 @@ venv.bak/
 
 # App Data & Local Storage
 data/*.db
+data/*.json
+!data/config.example.json
 data/uploads/*
 !data/uploads/.gitkeep
 
