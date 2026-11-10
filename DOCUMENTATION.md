@@ -1,4 +1,4 @@
-# 📘 Ollama Desktop Chatbot: Technical Architecture & System Documentation
+# Ollama Desktop Chatbot: Technical Architecture & System Documentation
 
 This document provides a comprehensive technical reference for the **Ollama Desktop Chatbot** architecture, execution pipelines, function call paths, data schemas, and the rationale behind each component in the technology stack.
 
@@ -119,7 +119,7 @@ When a user submits a prompt, the system executes the following chronological ca
   └─► `app.js` SSE Stream Reader:
         ├─ Receives SSE chunks, updates inner HTML via `renderMarkdown(accumulatedText)`.
         ├─ Highlights syntax on code blocks via `highlightCodeBlocks()`.
-        ├─ On `type: "done"`, updates token pill, attaches speed badge (`⚡ 1.2s (45.1 tok/s)`), and refreshes history title.
+        ├─ On `type: "done"`, updates token pill, attaches speed badge (`1.2s (45.1 tok/s)`), and refreshes history title.
 ```
 
 ---

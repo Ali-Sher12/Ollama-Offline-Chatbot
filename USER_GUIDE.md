@@ -1,4 +1,4 @@
-# 📖 Ollama Desktop Chatbot: User Guide & Manual
+# Ollama Desktop Chatbot: User Guide & Manual
 
 Welcome to the **Ollama Desktop Chatbot** user manual! This guide covers everything you need to know to install, configure, and use your desktop AI application.
 
@@ -86,38 +86,38 @@ The interface features an **Antigravity / Cursor-inspired dark blue and black th
 
 ```
 ┌─────────────────┬────────────────────────────────────────────────────────┐
-│  Ollama Desktop │ [ Model Dropdown: llama3.2:1b ▼ ]  [ 0 tok ] [⬇] [⚙]  │
+│  Ollama Desktop │ [ Model Dropdown: llama3.2:1b v ]  [ 0 tok ] [Export]  │
 ├─────────────────┼────────────────────────────────────────────────────────┤
 │ [+ New Chat]    │                                                        │
 │ [Search chats..]│                     Chat Feed                          │
 │                 │                                                        │
-│ • Research      │  User: How does async file I/O work in Python?         │
-│ • Data Analysis │  Assistant: [Detailed Markdown & Code Block]           │
-│ • Code Review   │  ⚡ 1.2s (45.1 tok/s) • 32 in / 148 out                │
+│ - Research      │  User: How does async file I/O work in Python?         │
+│ - Data Analysis │  Assistant: [Detailed Markdown & Code Block]           │
+│ - Code Review   │  1.2s (45.1 tok/s) • 32 in / 148 out                   │
 │                 │                                                        │
 │                 ├────────────────────────────────────────────────────────┤
-│                 │ [📎 document.pdf (142 KB) ✕]                           │
+│                 │ [document.pdf (142 KB) x]                              │
 │                 │ [ Type your message...                               ] │
-│ ● Ollama Online │ [ + ] [ 🔁 Append Chat ] [ 🌐 Web Search ]       [ ▲ ] │
+│ [o] Ollama Live │ [ + ] [ Append Chat ] [ Web Search ]            [Send] │
 └─────────────────┴────────────────────────────────────────────────────────┘
 ```
 
 1. **Left Sidebar**:
    - **`+ New Chat`**: Starts a fresh conversation.
    - **Search Input**: Filters chat sessions by title in real-time.
-   - **Session List**: Click any chat to view its complete history, rename it, or click the trash can icon (`🗑`) to delete it.
+   - **Session List**: Click any chat to view its complete history, rename it, or click the delete button to remove it.
    - **Ollama Status Dot**: Displays green when your local Ollama server is detected, or red if offline.
 2. **Top Navigation Bar**:
    - **Model Selector**: Switch between local Ollama models and cloud providers on the fly.
    - **Token Usage Pill**: Displays current session token count. Click it to open the full Analytics Drawer.
    - **Export Button**: Download the conversation as a formatted Microsoft Word document (`.docx`) or Markdown (`.md`).
-   - **Settings Button (`⚙`)**: Configure API keys, token limits, and custom endpoints.
+   - **Settings Button**: Configure API keys, token limits, and custom endpoints.
 3. **Bottom Interaction Bar**:
-   - **Attachment Tray**: Shows attached files with file size badges and `✕` remove buttons.
+   - **Attachment Tray**: Shows attached files with file size badges and remove buttons.
    - **`+` (Plus) Button**: Open file picker to attach documents and code.
    - **`Append Chat` Toggle**: Control multi-turn memory.
    - **`Web Search` Toggle**: Enable live internet searching.
-   - **Send Button (`▲`)**: Submit query (or stop streaming with `■`).
+   - **Send Button**: Submit query (or stop streaming with Stop).
 
 ---
 
@@ -137,14 +137,14 @@ Gone are the inconvenient CLI prompts! Simply click the **`+`** icon next to the
 1. Click the **`+`** icon.
 2. Select one or multiple files.
 3. Preview chips will appear above the input box showing the filename and size.
-4. If you attach a file by accident, click the **`✕`** icon on the chip to remove it.
+4. If you attach a file by accident, click the remove icon on the chip to remove it.
 5. Type your question (e.g., *"Summarize the quarterly financials in this spreadsheet"* or *"Find bugs in this Python file"*) and press **Enter**.
 
 ---
 
 ## 6. Using Local Ollama Models
 
-Local models run **100% offline, privately, and completely free of charge (\$0.00)**.
+Local models run **100% offline, privately, and completely free of charge ($0.00)**.
 
 ### Model Discovery:
 When the application starts, it queries your local Ollama instance and populates the model dropdown with all installed models (e.g. `llama3.2:1b`, `qwen2.5:1.5b`, `deepseek-r1`, etc.).
@@ -169,7 +169,7 @@ You can pull new models into Ollama in two ways:
 
 You can seamlessly switch between local Ollama and leading cloud AI models:
 
-1. Click the **Settings (`⚙`)** icon in the top right.
+1. Click the **Settings** icon in the top right.
 2. Enter your API key(s) for the providers you want to use:
    - **OpenAI**: `sk-...` (Access GPT-4o, GPT-4o Mini)
    - **Anthropic**: `sk-ant-...` (Access Claude 3.5 Sonnet, Claude 3.5 Haiku)
@@ -221,7 +221,7 @@ Click the **Token Pill** in the top header (`0 tokens`) to view the Analytics Da
    - **Duration**: Total seconds taken to compute the response.
    - **Prompt & Completion Tokens**: Exact input and output token counts.
 2. **Financial Cost**:
-   - Local Ollama usage is always calculated at **\$0.00**.
+   - Local Ollama usage is always calculated at **$0.00**.
    - Cloud models calculate real-time estimated costs based on standard pricing tiers.
 3. **Budget Limit Tracker**:
    - Set a maximum token budget (e.g. `100,000` tokens) in Settings.
@@ -233,7 +233,7 @@ Click the **Token Pill** in the top header (`0 tokens`) to view the Analytics Da
 
 You can preserve and share your conversations at any time:
 
-1. Click the **Export (`⬇`)** button in the top header.
+1. Click the **Export** button in the top header.
 2. A prompt will ask whether you want a **Word Document** or **Markdown**:
    - **Word Document (`.docx`)**: Generates a formatted document saved to the `OutWrite Documents/` folder with headers, model details, timestamps, and attached file records (preserving the original script's capability).
    - **Markdown (`.md`)**: Downloads a clean, portable `.md` file directly to your browser/computer.
