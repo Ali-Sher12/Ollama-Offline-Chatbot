@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ollama Desktop Chatbot</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <!-- Markdown parser (marked.js) and syntax highlighter (highlight.js) loaded via CDN with local fallback -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar: Chat History -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-row">
+          <div class="app-brand">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path>
+              <path d="M12 6v6l4 2"></path>
+            </svg>
+            <span>Ollama Desktop</span>
+          </div>
+        </div>
+
+        <button class="btn-new-chat" id="btnNewChat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          New Chat
+        </button>
+      </div>
+
+      <div class="chat-history-search">
+        <input type="text" id="searchHistoryInput" class="search-input" placeholder="Search chats...">
+      </div>
+
+      <div class="sidebar-content" id="conversationsList">
+        <!-- Rendered conversation list -->
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="status-badge" id="ollamaStatus">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Checking Ollama...</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Chat Workspace -->
+    <main class="main-chat">
+      <!-- Chat Header -->
+      <header class="chat-header">
+        <div class="header-left">
+          <!-- Model Selector -->
+          <div class="model-selector-wrapper">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #60a5fa;">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            <select id="modelSelector" class="model-select">
+              <optgroup label="Local Ollama" id="optGroupOllama">
+                <option value="ollama:llama3.2:1b">llama3.2:1b</option>
+              </optgroup>
+              <optgroup label="Online LLMs" id="optGroupOnline">
+                <option value="openai:gpt-4o-mini">OpenAI: GPT-4o Mini</option>
+                <option value="openai:gpt-4o">OpenAI: GPT-4o</option>
+                <option value="anthropic:claude-3-5-sonnet-20241022">Anthropic: Claude 3.5 Sonnet</option>
+                <option value="gemini:gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="groq:llama-3.3-70b-versatile">Groq: Llama 3.3 70B</option>
+                <option value="openrouter:meta-llama/llama-3.3-70b-instruct">OpenRouter: Llama 3.3 70B</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <!-- Token Usage Pill -->
+          <div class="token-pill" id="btnOpenAnalytics" title="Click to view full Token Analytics">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+            <span id="sessionTokensCount">0 tokens</span>
+          </div>
+
+          <!-- Export Button -->
+          <button class="btn-header-action" id="btnExportChat" title="Export Chat (DOCX / Markdown)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </button>
+
+          <!-- Settings Button -->
+          <button class="btn-header-action" id="btnOpenSettings" title="Settings & API Keys">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Message History List -->
+      <div class="messages-container" id="messagesContainer">
+        <!-- Rendered chat bubbles -->
+      </div>
+
+      <!-- Bottom Chat Input Bar -->
+      <div class="chat-input-area">
+        <div class="input-box-wrapper">
+          <!-- Attachment Chips Tray -->
+          <div class="attachments-tray" id="attachmentsTray"></div>
+
+          <!-- Hidden File Input for the Plus Button -->
+          <input type="file" id="filePickerInput" multiple style="display: none;" accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.py,.cpp,.h,.c,.js,.ts,.html,.css,.json,.md">
+
+          <div class="input-row">
+            <textarea
+              id="messageInput"
+              class="message-textarea"
+              placeholder="Ask anything, or attach files with '+'..."
+              rows="1"
+            ></textarea>
+          </div>
+
+          <div class="input-toolbar">
+            <div class="toolbar-left">
+              <!-- Plus button to attach files (Antigravity/Cursor style) -->
+              <button class="btn-plus-attach" id="btnPlusAttach" title="Add files (.pdf, .docx, .txt, .xlsx, .pptx, code)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+
+              <!-- Append Chat Memory Toggle (Remember previous messages/decisions) -->
+              <div class="toggle-web-search active" id="btnToggleAppendChat" title="Toggle whether model remembers previous chat decisions and messages (ON = multi-turn memory, OFF = single-turn)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                <span>Append Chat</span>
+              </div>
+
+              <!-- Web Search RAG Toggle -->
+              <div class="toggle-web-search" id="btnToggleWebSearch" title="Toggle real-time web search">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="2" y1="12" x2="22" y2="12"></line>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+                <span>Web Search</span>
+              </div>
+            </div>
+
+            <div class="toolbar-right">
+              <!-- Send Button -->
+              <button class="btn-send" id="btnSendMessage" title="Send (Enter)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="19" x2="12" y2="5"></line>
+                  <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal: Settings & API Keys -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Settings & Providers</h3>
+        <button class="icon-btn-sm" id="btnCloseSettings">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Local Ollama URL</label>
+          <input type="text" id="settingOllamaUrl" class="form-input" placeholder="http://localhost:11434">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">OpenAI API Key</label>
+          <input type="password" id="settingOpenAiKey" class="form-input" placeholder="sk-...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Anthropic API Key</label>
+          <input type="password" id="settingAnthropicKey" class="form-input" placeholder="sk-ant-...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Google Gemini API Key</label>
+          <input type="password" id="settingGeminiKey" class="form-input" placeholder="AIzaSy...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Groq API Key</label>
+          <input type="password" id="settingGroqKey" class="form-input" placeholder="gsk_...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">OpenRouter API Key</label>
+          <input type="password" id="settingOpenRouterKey" class="form-input" placeholder="sk-or-...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Token Budget Limit (e.g. 100,000)</label>
+          <input type="number" id="settingTokenBudget" class="form-input" placeholder="100000">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btnCancelSettings">Cancel</button>
+        <button class="btn-primary" id="btnSaveSettings">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Analytics & Budget Tracker -->
+  <div class="modal-overlay" id="analyticsModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Token Analytics & Budget Tracker</h3>
+        <button class="icon-btn-sm" id="btnCloseAnalytics">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Total Tokens Used</span>
+            <span class="stat-value" id="statTotalTokens">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Estimated Cost</span>
+            <span class="stat-value" id="statEstimatedCost">$0.00</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Prompt (Input)</span>
+            <span class="stat-value" id="statPromptTokens">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Completion (Output)</span>
+            <span class="stat-value" id="statCompletionTokens">0</span>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 8px;">
+          <div style="display: flex; justify-content: space-between; font-size: 13px;">
+            <span class="form-label">Budget Limit Usage</span>
+            <span id="budgetUsageLabel" style="color: var(--text-muted); font-size: 12px;">0 / 100,000 (0%)</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="budgetProgressFill" style="width: 0%;"></div>
+          </div>
+          <span id="budgetRemainingLabel" style="font-size: 12px; color: #60a5fa; margin-top: 4px;">Remaining: 100,000 tokens</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="btnDismissAnalytics">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
