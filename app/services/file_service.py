@@ -70,6 +70,9 @@ class FileService:
                             lines.append(" | ".join(row))
                 return "\n".join(lines)
 
+            elif ext in ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'):
+                return f"[Image file: {file_path.name}. Size: {file_path.stat().st_size} bytes. Use analyze_image tool to inspect visual content, OCR, or diagrams.]"
+
             else:
                 # Text or source code files (.txt, .md, .py, .cpp, .h, .c, .js, .ts, .html, .css, .json, etc.)
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -82,6 +85,8 @@ class FileService:
     def get_file_metadata(file_path: Path, max_chars: int = 40000) -> Dict[str, Any]:
         """Reads file, extracts text, and returns formatted metadata."""
         size_bytes = file_path.stat().st_size
+        ext = file_path.suffix.lower()
+        is_img = ext in ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')
         raw_text = FileService.extract_text(file_path)
         truncated = False
         if len(raw_text) > max_chars:
@@ -94,10 +99,11 @@ class FileService:
         return {
             "filename": file_path.name,
             "filepath": str(file_path),
-            "extension": file_path.suffix.lower(),
+            "extension": ext,
             "size_str": size_str,
             "char_count": len(raw_text),
             "is_truncated": truncated,
+            "is_image": is_img,
             "content": raw_text
         }
 
