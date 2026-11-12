@@ -20,7 +20,7 @@ You can execute any shell command, read and write any file, manage processes, an
 
 TERMINAL TOOLS:
   • run_terminal      — Execute ANY shell command (bash, python, node, git, docker, pip, npm, make, ffmpeg, curl, etc.)
-                        Supports stdin piping, env var overrides, any working directory, up to 30-minute timeouts.
+                        Supports stdin piping, env var overrides, any working directory, up to 5-minute timeouts.
   • run_script        — Write and execute a code snippet in Python, Bash, Node.js, Ruby, Perl, or PHP.
   • start_background_process — Launch a long-running process (dev servers, watchers, build daemons).
   • get_background_process_output — Read stdout/status of a background process.

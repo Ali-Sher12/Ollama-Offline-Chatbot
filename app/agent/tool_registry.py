@@ -134,7 +134,7 @@ class ToolRegistry:
                 "properties": {
                     "command":     {"type": "string",  "description": "Shell command to execute (runs in bash)."},
                     "cwd":         {"type": "string",  "description": "Working directory (absolute or relative to workspace). Created if it doesn't exist."},
-                    "timeout":     {"type": "integer", "description": "Max execution time in seconds (default 120, max 1800)."},
+                    "timeout":     {"type": "integer", "description": "Max execution time in seconds (default 300, max 300 / 5 minutes)."},
                     "stdin_input": {"type": "string",  "description": "Text to pipe into the command's stdin (for prompts/interactive tools)."},
                     "env_vars":    {"type": "object",  "description": "Extra environment variables {KEY: VALUE} for this command only.",
                                     "additionalProperties": {"type": "string"}},

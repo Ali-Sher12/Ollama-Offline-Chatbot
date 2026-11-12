@@ -357,7 +357,7 @@ class PermissionManager:
     def get_timeout(cls, requested_timeout: int = None) -> int:
         if requested_timeout and requested_timeout > 0:
             return min(requested_timeout, 300)  # capped at 5 minutes
-        return int(config_manager.get("agent_timeout_seconds", 60))
+        return int(config_manager.get("agent_timeout_seconds", 300))
 
 
 @dataclass

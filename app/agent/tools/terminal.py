@@ -3,7 +3,7 @@ Agent Terminal Tool — Unrestricted, full-power shell execution.
 
 Supports:
   • Any shell command (bash, python, node, git, docker, ffmpeg, etc.)
-  • Long-running commands with configurable timeout (up to 30 minutes)
+  • Long-running commands with configurable timeout (up to 5 minutes)
   • stdin piping (pass input directly to interactive commands)
   • Background process launching and listing
   • Per-command environment variable overrides
@@ -73,7 +73,7 @@ def run_terminal(
     command     : Shell command string (passed to bash -c).
     cwd         : Working directory. Relative paths are resolved from workspace root.
                   Absolute paths outside workspace are allowed.
-    timeout     : Max seconds to wait (default 120, max 1800 / 30 min).
+    timeout     : Max seconds to wait (default 300, max 300 / 5 min).
     stdin_input : Optional text to pipe into the command's stdin.
     env_vars    : Extra environment variables to set for this command only.
     """
@@ -396,8 +396,8 @@ def list_background_processes() -> Dict[str, Any]:
 
 def _clamp_timeout(requested: Optional[int]) -> int:
     if requested and requested > 0:
-        return min(int(requested), 1800)   # up to 30 minutes
-    return 120  # default: 2 minutes
+        return min(int(requested), 300)   # up to 5 minutes
+    return 300  # default: 5 minutes
 
 
 def _truncate(text: str, limit: int) -> str:
