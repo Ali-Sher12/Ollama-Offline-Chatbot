@@ -326,19 +326,26 @@ async def chat_endpoint(req: ChatRequest):
     conv = db.get_conversation(req.conversation_id)
     if not conv:
         # Create one if doesn't exist
-        conv = db.create_conversation(title="Chat", provider=req.provider or "ollama", model=req.model or "llama3.2:1b")
+        conv = db.create_conversation(
+            title="Chat",
+            provider=req.provider or "ollama",
+            model=req.model or "llama3.2:1b",
+            project_id=req.project_id
+        )
         req.conversation_id = conv["id"]
 
+    project_id = req.project_id or conv.get("project_id")
     provider = req.provider or conv["provider"]
     model = req.model or conv["model"]
 
     # 1. Web search if requested
     search_results = []
     if req.use_web_search:
-        search_results = rag_service.search_web(req.message)
+        n_results = max(1, min(20, req.web_search_results_count or 10))
+        search_results = rag_service.search_web(req.message, max_results=n_results)
 
     # 2. Record user message in DB
-    db.add_message(
+    user_message = db.add_message(
         conversation_id=req.conversation_id,
         role="user",
         content=req.message,
