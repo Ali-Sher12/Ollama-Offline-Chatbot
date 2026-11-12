@@ -703,4 +703,564 @@ class LLMService:
             "estimated_cost": estimated_cost
         }
 
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        provider: str,
+        model: str,
+        keep_alive: str = "30m"
+    ) -> Dict[str, Any]:
+        """
+        Unified tool-calling method across local Ollama, OpenAI-compatible APIs, and Anthropic.
+        Returns a dict:
+        {
+            "content": str,
+            "tool_calls": List[{"id": str, "name": str, "arguments": dict}],
+            "prompt_tokens": int,
+            "completion_tokens": int,
+            "raw_message": dict
+        }
+        """
+        import uuid
+
+        if provider == "ollama":
+            ollama_url = config_manager.get("ollama_url", "http://localhost:11434")
+            # Format messages for Ollama tool calling
+            ollama_msgs = []
+            for m in messages:
+                role = m.get("role")
+                if role == "tool":
+                    ollama_msgs.append({
+                        "role": "tool",
+                        "content": str(m.get("content", ""))
+                    })
+                elif role == "assistant" and m.get("tool_calls"):
+                    # Assistant message containing tool calls
+                    ollama_calls = []
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", {})
+                        ollama_calls.append({
+                            "function": {
+                                "name": fn.get("name", tc.get("name", "")),
+                                "arguments": fn.get("arguments", tc.get("arguments", {}))
+                            }
+                        })
+                    ollama_msgs.append({
+                        "role": "assistant",
+                        "content": m.get("content", ""),
+                        "tool_calls": ollama_calls
+                    })
+                else:
+                    ollama_msgs.append({
+                        "role": role,
+                        "content": m.get("content", "")
+                    })
+
+            payload = {
+                "model": model,
+                "messages": ollama_msgs,
+                "tools": tools,
+                "stream": False,
+                "keep_alive": keep_alive
+            }
+
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    res = client.post(f"{ollama_url}/api/chat", json=payload)
+                    if res.status_code != 200:
+                        error_text = res.text or ""
+                        if "does not support tools" in error_text.lower():
+                            raise RuntimeError(
+                                f"The selected model '{model}' does not support tool calling, which Agent Mode requires. "
+                                "Choose a tool-capable model (for example qwen2.5:1.5b, qwen2.5:3b, or mistral), "
+                                "or turn off Agent Mode."
+                            )
+                        raise RuntimeError(f"Ollama tool-call error ({res.status_code}): {error_text}")
+                    data = res.json()
+                    msg = data.get("message", {}) or {}
+                    content = msg.get("content", "") or ""
+                    raw_calls = msg.get("tool_calls") or []
+
+                    parsed_calls = []
+                    for idx, call in enumerate(raw_calls):
+                        fn = call.get("function", {})
+                        fn_name = fn.get("name", "")
+                        fn_args = fn.get("arguments", {})
+                        if isinstance(fn_args, str):
+                            try:
+                                fn_args = json.loads(fn_args)
+                            except Exception:
+                                pass
+                        call_id = call.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+                        parsed_calls.append({
+                            "id": call_id,
+                            "name": fn_name,
+                            "arguments": fn_args
+                        })
+
+                    prompt_tokens = data.get("prompt_eval_count", 0)
+                    completion_tokens = data.get("eval_count", 0)
+
+                    return {
+                        "content": content,
+                        "tool_calls": parsed_calls,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "raw_message": msg
+                    }
+            except httpx.TimeoutException:
+                raise RuntimeError(
+                    f"Ollama did not respond within 120 seconds while planning a tool call. "
+                    f"Model '{model}' may be too slow or stuck. Try a smaller/faster model or a shorter task."
+                )
+            except RuntimeError:
+                raise
+            except Exception as e:
+                raise RuntimeError(f"Failed Ollama tool call request: {str(e)}")
+
+        elif provider in ("openai", "groq", "openrouter", "gemini"):
+            api_keys = config_manager.get("api_keys", {})
+            api_key = api_keys.get(provider, "").strip()
+            endpoints = config_manager.get("custom_endpoints", {})
+            base_url = endpoints.get(provider, "https://api.openai.com/v1")
+            if provider == "gemini":
+                base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+            if not api_key:
+                raise RuntimeError(f"API key for {provider.capitalize()} is missing. Configure it in Settings.")
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            if provider == "openrouter":
+                headers["HTTP-Referer"] = "https://github.com/Ali-Sher12/Ollama-Offline-Chatbot"
+                headers["X-Title"] = "Ollama Desktop Chatbot"
+
+            # Format messages
+            openai_msgs = []
+            for m in messages:
+                role = m.get("role")
+                if role == "tool":
+                    openai_msgs.append({
+                        "role": "tool",
+                        "tool_call_id": m.get("tool_call_id", f"call_{uuid.uuid4().hex[:8]}"),
+                        "content": str(m.get("content", ""))
+                    })
+                elif role == "assistant" and m.get("tool_calls"):
+                    openai_calls = []
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", {})
+                        name = fn.get("name", tc.get("name", ""))
+                        args = fn.get("arguments", tc.get("arguments", {}))
+                        arg_str = json.dumps(args) if isinstance(args, dict) else str(args)
+                        openai_calls.append({
+                            "id": tc.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {"name": name, "arguments": arg_str}
+                        })
+                    openai_msgs.append({
+                        "role": "assistant",
+                        "content": m.get("content", ""),
+                        "tool_calls": openai_calls
+                    })
+                else:
+                    openai_msgs.append({
+                        "role": role,
+                        "content": m.get("content", "")
+                    })
+
+            payload = {
+                "model": model,
+                "messages": openai_msgs,
+                "tools": tools,
+                "stream": False
+            }
+
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    res = client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+                    if res.status_code != 200:
+                        raise RuntimeError(f"{provider.capitalize()} API error ({res.status_code}): {res.text}")
+                    data = res.json()
+                    choices = data.get("choices", [])
+                    if not choices:
+                        return {"content": "", "tool_calls": [], "prompt_tokens": 0, "completion_tokens": 0}
+
+                    msg = choices[0].get("message", {})
+                    content = msg.get("content", "") or ""
+                    raw_calls = msg.get("tool_calls", []) or []
+
+                    parsed_calls = []
+                    for tc in raw_calls:
+                        fn = tc.get("function", {})
+                        fn_name = fn.get("name", "")
+                        raw_args = fn.get("arguments", "{}")
+                        if isinstance(raw_args, str):
+                            try:
+                                args_dict = json.loads(raw_args)
+                            except Exception:
+                                args_dict = {"raw": raw_args}
+                        else:
+                            args_dict = raw_args or {}
+
+                        parsed_calls.append({
+                            "id": tc.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+                            "name": fn_name,
+                            "arguments": args_dict
+                        })
+
+                    usage = data.get("usage", {})
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+
+                    return {
+                        "content": content,
+                        "tool_calls": parsed_calls,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "raw_message": msg
+                    }
+            except Exception as e:
+                raise RuntimeError(f"Request to {provider.capitalize()} failed: {str(e)}")
+
+        elif provider == "anthropic":
+            api_keys = config_manager.get("api_keys", {})
+            api_key = api_keys.get("anthropic", "").strip()
+            if not api_key:
+                raise RuntimeError("Anthropic API key is missing. Configure it in Settings.")
+
+            # Convert tools to Anthropic format
+            anthropic_tools = []
+            for t in tools:
+                fn = t.get("function", {})
+                anthropic_tools.append({
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "input_schema": fn.get("parameters", {"type": "object", "properties": {}})
+                })
+
+            system_prompt = ""
+            anthropic_messages = []
+            for m in messages:
+                if m.get("role") == "system":
+                    system_prompt += m.get("content", "") + "\n"
+                elif m.get("role") == "tool":
+                    anthropic_messages.append({
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": m.get("tool_call_id", ""),
+                            "content": str(m.get("content", ""))
+                        }]
+                    })
+                elif m.get("role") == "assistant" and m.get("tool_calls"):
+                    blocks = []
+                    if m.get("content"):
+                        blocks.append({"type": "text", "text": m["content"]})
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", {})
+                        blocks.append({
+                            "type": "tool_use",
+                            "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:8]}"),
+                            "name": fn.get("name", tc.get("name", "")),
+                            "input": fn.get("arguments", tc.get("arguments", {}))
+                        })
+                    anthropic_messages.append({"role": "assistant", "content": blocks})
+                else:
+                    anthropic_messages.append({
+                        "role": m.get("role"),
+                        "content": m.get("content", "")
+                    })
+
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "max_tokens": 4096,
+                "messages": anthropic_messages,
+                "tools": anthropic_tools
+            }
+            if system_prompt.strip():
+                payload["system"] = system_prompt.strip()
+
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    res = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+                    if res.status_code != 200:
+                        raise RuntimeError(f"Anthropic API error ({res.status_code}): {res.text}")
+                    data = res.json()
+
+                    content_text = ""
+                    parsed_calls = []
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            content_text += block.get("text", "")
+                        elif block.get("type") == "tool_use":
+                            parsed_calls.append({
+                                "id": block.get("id"),
+                                "name": block.get("name"),
+                                "arguments": block.get("input", {})
+                            })
+
+                    usage = data.get("usage", {})
+                    prompt_tokens = usage.get("input_tokens", 0)
+                    completion_tokens = usage.get("output_tokens", 0)
+
+                    return {
+                        "content": content_text,
+                        "tool_calls": parsed_calls,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "raw_message": data
+                    }
+            except Exception as e:
+                raise RuntimeError(f"Request to Anthropic failed: {str(e)}")
+
+        else:
+            raise RuntimeError(f"Tool calling is unsupported for provider '{provider}'")
+
+    def resolve_vision_model(
+        self,
+        current_provider: str,
+        current_model: str
+    ) -> Tuple[str, str]:
+        """
+        Resolves the appropriate provider and model for multimodal visual analysis.
+        Uses configured vision_provider/vision_model if available, or tests current model,
+        or falls back to available vision-capable providers.
+        """
+        cfg_provider = config_manager.get("vision_provider", "auto")
+        cfg_model = config_manager.get("vision_model", "")
+
+        if cfg_provider and cfg_provider != "auto" and cfg_model:
+            return cfg_provider, cfg_model
+
+        # Check if current provider/model is known vision-capable
+        vision_known_models = {
+            "openai": ["gpt-4o", "gpt-4o-mini"],
+            "anthropic": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+            "gemini": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+        }
+
+        if current_provider in vision_known_models:
+            return current_provider, current_model
+
+        # If current is local ollama, check if a vision model is installed
+        if current_provider == "ollama":
+            ollama_models = [m["id"] for m in self.get_ollama_models()]
+            for vm in ["llama3.2-vision", "llava", "moondream", "minicpm-v", "bakllava"]:
+                for om in ollama_models:
+                    if vm in om.lower():
+                        return "ollama", om
+
+        # Check if user has Gemini, OpenAI, or Anthropic API key configured
+        api_keys = config_manager.get("api_keys", {})
+        if api_keys.get("gemini", "").strip():
+            return "gemini", "gemini-2.0-flash"
+        if api_keys.get("openai", "").strip():
+            return "openai", "gpt-4o-mini"
+        if api_keys.get("anthropic", "").strip():
+            return "anthropic", "claude-3-5-sonnet-20241022"
+
+        # Fall back to current provider and model
+        return current_provider, current_model
+
+    def analyze_image_with_model(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        prompt: str,
+        provider: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Sends an image to a multimodal vision model (Ollama, OpenAI, Gemini, or Claude).
+        Returns {'analysis': str, 'provider': str, 'model': str}.
+        """
+        import base64
+
+        current_prov = provider or config_manager.get("selected_provider", "ollama")
+        current_mod = model or config_manager.get("selected_model", "llama3.2:1b")
+        resolved_prov, resolved_mod = self.resolve_vision_model(current_prov, current_mod)
+
+        b64_str = base64.b64encode(image_bytes).decode("utf-8")
+
+        if resolved_prov == "ollama":
+            ollama_url = config_manager.get("ollama_url", "http://localhost:11434")
+            payload = {
+                "model": resolved_mod,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                        "images": [b64_str]
+                    }
+                ],
+                "stream": False
+            }
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    res = client.post(f"{ollama_url}/api/chat", json=payload)
+                    if res.status_code != 200:
+                        raise RuntimeError(f"Ollama vision error ({res.status_code}): {res.text}")
+                    data = res.json()
+                    analysis = data.get("message", {}).get("content", "")
+                    return {
+                        "success": True,
+                        "analysis": analysis,
+                        "provider": "ollama",
+                        "model": resolved_mod
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Ollama vision request failed: {str(e)}",
+                    "provider": "ollama",
+                    "model": resolved_mod
+                }
+
+        elif resolved_prov in ("openai", "gemini", "groq", "openrouter"):
+            api_keys = config_manager.get("api_keys", {})
+            api_key = api_keys.get(resolved_prov, "").strip()
+            endpoints = config_manager.get("custom_endpoints", {})
+            base_url = endpoints.get(resolved_prov, "https://api.openai.com/v1")
+            if resolved_prov == "gemini":
+                base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+            if not api_key:
+                return {
+                    "success": False,
+                    "error": f"API key for {resolved_prov.capitalize()} is missing for vision analysis.",
+                    "provider": resolved_prov,
+                    "model": resolved_mod
+                }
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": resolved_mod,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{mime_type};base64,{b64_str}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 2048
+            }
+
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    res = client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+                    if res.status_code != 200:
+                        return {
+                            "success": False,
+                            "error": f"{resolved_prov.capitalize()} API error ({res.status_code}): {res.text}",
+                            "provider": resolved_prov,
+                            "model": resolved_mod
+                        }
+                    data = res.json()
+                    choices = data.get("choices", [])
+                    analysis = choices[0].get("message", {}).get("content", "") if choices else ""
+                    return {
+                        "success": True,
+                        "analysis": analysis,
+                        "provider": resolved_prov,
+                        "model": resolved_mod
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Vision request failed: {str(e)}",
+                    "provider": resolved_prov,
+                    "model": resolved_mod
+                }
+
+        elif resolved_prov == "anthropic":
+            api_keys = config_manager.get("api_keys", {})
+            api_key = api_keys.get("anthropic", "").strip()
+            if not api_key:
+                return {
+                    "success": False,
+                    "error": "Anthropic API key is missing for vision analysis.",
+                    "provider": "anthropic",
+                    "model": resolved_mod
+                }
+
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": resolved_mod,
+                "max_tokens": 2048,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime_type,
+                                    "data": b64_str
+                                }
+                            },
+                            {"type": "text", "text": prompt}
+                        ]
+                    }
+                ]
+            }
+
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    res = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+                    if res.status_code != 200:
+                        return {
+                            "success": False,
+                            "error": f"Anthropic API error ({res.status_code}): {res.text}",
+                            "provider": "anthropic",
+                            "model": resolved_mod
+                        }
+                    data = res.json()
+                    analysis = ""
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            analysis += block.get("text", "")
+                    return {
+                        "success": True,
+                        "analysis": analysis,
+                        "provider": "anthropic",
+                        "model": resolved_mod
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Anthropic vision request failed: {str(e)}",
+                    "provider": "anthropic",
+                    "model": resolved_mod
+                }
+
+        return {
+            "success": False,
+            "error": f"Unsupported vision provider '{resolved_prov}'",
+            "provider": resolved_prov,
+            "model": resolved_mod
+        }
+
 llm_service = LLMService()
