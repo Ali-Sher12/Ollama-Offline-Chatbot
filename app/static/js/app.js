@@ -2058,9 +2058,32 @@
     }
   }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function getToolSummary(name, args) {
+    if (!args) return name;
+    if (name === 'run_terminal') return args.command || name;
+    if (name === 'read_file' || name === 'write_file' || name === 'edit_file') return args.path || name;
+    if (name === 'list_files') return args.directory || '.';
+    if (name === 'manage_docx') return `${args.action} on ${args.file_path || ''}`;
+    if (name === 'analyze_image') return `${args.mode || 'general'}: ${args.image_path || ''}`;
+    return name;
+  }
+
   function stopGeneration() {
     if (activeAbortController) {
       activeAbortController.abort();
+    }
+    clearPermissionPrompts();
+    if (currentAgentTaskId) {
+      fetch(`/api/agent/cancel/${currentAgentTaskId}`, { method: 'POST' }).catch(() => {});
+      currentAgentTaskId = null;
     }
   }
 
