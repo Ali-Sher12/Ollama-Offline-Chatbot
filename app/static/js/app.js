@@ -592,11 +592,789 @@
   }
 
   // --------------------------------------------------------------------------
+  // Searchable model selector
+  // --------------------------------------------------------------------------
+  function getModelOptions() {
+    const providerNames = {
+      ollama: 'Local Ollama',
+      openai: 'OpenAI',
+      anthropic: 'Anthropic',
+      gemini: 'Google Gemini',
+      groq: 'Groq',
+      openrouter: 'OpenRouter'
+    };
+
+    return Array.from(modelSelector.options).map((opt, index) => {
+      const providerId = String(opt.value || '').split(':')[0];
+      const groupLabel = opt.parentElement && opt.parentElement.tagName === 'OPTGROUP'
+        ? opt.parentElement.label
+        : 'Models';
+      return {
+        value: opt.value,
+        label: opt.textContent || opt.value,
+        provider: providerNames[providerId] || groupLabel,
+        providerId,
+        title: opt.title || '',
+        disabled: opt.disabled,
+        index
+      };
+    });
+  }
+
+  function updateModelSelectorLabel() {
+    if (!modelSelectorLabel) return;
+    const selected = modelSelector.options[modelSelector.selectedIndex];
+    if (selected) {
+      modelSelectorLabel.textContent = selected.textContent || selected.value;
+      modelSelectorLabel.title = selected.title || selected.value;
+    } else {
+      modelSelectorLabel.textContent = 'Select a model';
+      modelSelectorLabel.title = '';
+    }
+  }
+
+  function toggleModelSearch(open) {
+    if (!modelSearchPopover) return;
+    if (open) {
+      modelSearchPopover.hidden = false;
+      if (modelSelectorButton) modelSelectorButton.setAttribute('aria-expanded', 'true');
+      if (modelSearchInput) {
+        modelSearchInput.value = '';
+        renderModelSearchResults('');
+        requestAnimationFrame(() => modelSearchInput.focus());
+      }
+    } else {
+      modelSearchPopover.hidden = true;
+      if (modelSelectorButton) modelSelectorButton.setAttribute('aria-expanded', 'false');
+      modelSearchActiveIndex = -1;
+    }
+  }
+
+  function normalizeModelSearchText(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[⭐★]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function modelOptionScore(option, query) {
+    if (!query) return 0;
+    const label = normalizeModelSearchText(option.label);
+    const value = normalizeModelSearchText(option.value);
+    const provider = normalizeModelSearchText(option.provider);
+
+    if (label === query || value === query) return 0;
+    if (label.startsWith(query) || value.startsWith(query)) return 1;
+    if (provider === query) return 1;
+    if (value.split(/[:\s/._-]+/).some((part) => part.startsWith(query))) return 2;
+    if (label.includes(query) || value.includes(query) || provider.includes(query)) return 3;
+    return 4;
+  }
+
+  function renderModelSearchResults(rawQuery) {
+    if (!modelSearchResults) return;
+
+    const query = normalizeModelSearchText(rawQuery);
+    const tokens = query.split(' ').filter(Boolean);
+    const allOptions = getModelOptions().filter((o) => !o.disabled);
+
+    const filtered = allOptions.filter((option) => {
+      const haystack = normalizeModelSearchText(
+        `${option.label} ${option.value} ${option.provider} ${option.title}`
+      );
+      return tokens.every((token) => haystack.includes(token));
+    });
+
+    if (modelSearchClear) {
+      modelSearchClear.style.display = rawQuery ? 'block' : 'none';
+    }
+
+    if (modelSearchSummary) {
+      if (filtered.length === 0) {
+        modelSearchSummary.textContent = 'No matching models';
+      } else if (query) {
+        modelSearchSummary.textContent = `${filtered.length} model${filtered.length === 1 ? '' : 's'} matching “${rawQuery.trim()}”`;
+      } else {
+        modelSearchSummary.textContent = `${filtered.length} model${filtered.length === 1 ? '' : 's'} available`;
+      }
+    }
+
+    modelSearchResults.innerHTML = '';
+    modelSearchItems = [];
+    modelSearchActiveIndex = -1;
+
+    if (filtered.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'model-search-empty';
+      empty.textContent = rawQuery
+        ? `No models match “${rawQuery.trim()}”. Try a model name, provider, or tag.`
+        : 'No models are available yet.';
+      modelSearchResults.appendChild(empty);
+      return;
+    }
+
+    // Keep provider grouping, but rank the best matches first inside each group.
+    const groups = new Map();
+    filtered.forEach((option) => {
+      if (!groups.has(option.provider)) groups.set(option.provider, []);
+      groups.get(option.provider).push(option);
+    });
+
+    groups.forEach((options, providerName) => {
+      options.sort((a, b) => {
+        return modelOptionScore(a, query) - modelOptionScore(b, query) || a.index - b.index;
+      });
+
+      const groupLabel = document.createElement('div');
+      groupLabel.className = 'model-search-group-label';
+      groupLabel.textContent = providerName;
+      modelSearchResults.appendChild(groupLabel);
+
+      options.forEach((option) => {
+        const itemIndex = modelSearchItems.length;
+        modelSearchItems.push(option);
+
+        const row = document.createElement('div');
+        row.className = 'model-search-item' + (option.value === modelSelector.value ? ' selected' : '');
+        row.setAttribute('role', 'option');
+        row.dataset.index = String(itemIndex);
+
+        const left = document.createElement('div');
+        left.className = 'model-search-item-left';
+
+        const name = document.createElement('span');
+        name.className = 'model-search-item-name';
+        name.textContent = option.label;
+
+        const id = document.createElement('span');
+        id.className = 'model-search-item-id';
+        id.textContent = option.value;
+
+        left.appendChild(name);
+        left.appendChild(id);
+
+        const badge = document.createElement('span');
+        badge.className = 'model-search-item-badge';
+        badge.textContent = option.providerId === 'ollama' ? 'Local' : option.provider;
+
+        row.appendChild(left);
+        row.appendChild(badge);
+        row.addEventListener('click', () => selectModelOption(option.value));
+        row.addEventListener('mouseenter', () => setModelSearchActive(itemIndex));
+        modelSearchResults.appendChild(row);
+      });
+    });
+  }
+
+  function setModelSearchActive(index) {
+    if (!modelSearchResults || modelSearchItems.length === 0) return;
+    modelSearchActiveIndex = (index + modelSearchItems.length) % modelSearchItems.length;
+    const rows = modelSearchResults.querySelectorAll('.model-search-item');
+    rows.forEach((row, i) => row.classList.toggle('active', i === modelSearchActiveIndex));
+    const activeRow = rows[modelSearchActiveIndex];
+    if (activeRow && activeRow.scrollIntoView) {
+      activeRow.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function handleModelSearchKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      toggleModelSearch(false);
+      if (modelSelectorButton) modelSelectorButton.focus();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setModelSearchActive(modelSearchActiveIndex < 0 ? 0 : modelSearchActiveIndex + 1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setModelSearchActive(
+        modelSearchActiveIndex < 0 ? modelSearchItems.length - 1 : modelSearchActiveIndex - 1
+      );
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const index = modelSearchActiveIndex >= 0 ? modelSearchActiveIndex : 0;
+      const option = modelSearchItems[index];
+      if (option) selectModelOption(option.value);
+    }
+  }
+
+  function selectModelOption(value) {
+    modelSelector.value = value;
+    modelSelector.dispatchEvent(new Event('change', { bubbles: true }));
+    updateModelSelectorLabel();
+    toggleModelSearch(false);
+  }
+
+  // --------------------------------------------------------------------------
+  // Local Model Library (download / delete without helper scripts)
+  // --------------------------------------------------------------------------
+  function openModelLibrary() {
+    if (!modelsModal) return;
+    modelsModal.classList.add('open');
+    updateModelLibrarySearchUI();
+    refreshModelLibrary();
+    if (modelLibrarySearchInput) {
+      requestAnimationFrame(() => modelLibrarySearchInput.focus());
+    }
+  }
+
+  async function refreshModelLibrary() {
+    await Promise.all([loadInstalledModels(), loadRecommendedModels()]);
+  }
+
+  const DOWNLOAD_ICON_SVG = `
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v12"></path>
+      <polyline points="7 10 12 15 17 10"></polyline>
+      <path d="M4 21h16"></path>
+    </svg>`;
+
+  const TRASH_ICON_SVG = `
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3 6 5 6 21 6"></polyline>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+    </svg>`;
+
+  const CHECK_ICON_SVG = `
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>`;
+
+  function modelMatchesLibraryQuery(m) {
+    const query = normalizeModelSearchText(modelLibraryQuery);
+    if (!query) return true;
+    const tokens = query.split(' ').filter(Boolean);
+    const haystack = normalizeModelSearchText(
+      `${m.id || ''} ${m.name || ''} ${m.raw_name || ''} ${m.description || ''} ${m.approx_size || ''}`
+    );
+    return tokens.every((token) => haystack.includes(token));
+  }
+
+  function updateModelLibrarySearchUI() {
+    if (modelLibrarySearchClear) {
+      modelLibrarySearchClear.style.display = modelLibraryQuery ? 'block' : 'none';
+    }
+    if (!modelLibrarySearchStatus) return;
+
+    const installedMatches = installedModelsCache.filter(modelMatchesLibraryQuery).length;
+    const recommendedMatches = recommendedModelsCache.filter(modelMatchesLibraryQuery).length;
+
+    if (modelLibraryQuery.trim()) {
+      const total = installedMatches + recommendedMatches;
+      modelLibrarySearchStatus.textContent = `${total} match${total === 1 ? '' : 'es'} for “${modelLibraryQuery.trim()}”`;
+    } else {
+      modelLibrarySearchStatus.textContent = `${installedModelsCache.length} installed • ${recommendedModelsCache.length} recommended`;
+    }
+  }
+
+  async function loadInstalledModels() {
+    if (!installedModelsList) return;
+    installedModelsList.innerHTML = '<div class="model-list-empty">Loading installed models...</div>';
+    try {
+      const res = await fetch('/api/models');
+      const data = await res.json();
+      installedModelsCache = (data.ollama && data.ollama.models) || [];
+      renderInstalledModels();
+      updateModelLibrarySearchUI();
+    } catch (e) {
+      installedModelsList.innerHTML = `<div class="model-list-empty">Could not read installed models: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderInstalledModels() {
+    if (!installedModelsList) return;
+    const models = installedModelsCache.filter(modelMatchesLibraryQuery);
+
+    if (installedModelsCount) {
+      installedModelsCount.textContent = modelLibraryQuery.trim()
+        ? `${models.length}/${installedModelsCache.length}`
+        : String(installedModelsCache.length);
+    }
+
+    if (installedModelsCache.length === 0) {
+      installedModelsList.innerHTML = '<div class="model-list-empty">No local models installed yet. Pick one below to download.</div>';
+      return;
+    }
+    if (models.length === 0) {
+      installedModelsList.innerHTML = `<div class="model-list-empty">No installed models match “${escapeHtml(modelLibraryQuery.trim())}”.</div>`;
+      return;
+    }
+
+    installedModelsList.innerHTML = '';
+    models.forEach((m) => {
+      const card = document.createElement('div');
+      card.className = 'model-card';
+
+      const info = document.createElement('div');
+      info.className = 'model-card-info';
+      info.innerHTML = `
+        <div class="model-card-title-row">
+          <span class="model-card-title">${escapeHtml(m.raw_name || m.id)}</span>
+          <span class="model-tag installed">Installed</span>
+        </div>
+        <span class="model-card-id">${escapeHtml(m.id)}</span>
+        <span class="model-card-desc">${escapeHtml(m.name)}</span>
+      `;
+
+      const action = document.createElement('div');
+      action.className = 'model-card-action';
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-danger';
+      deleteBtn.innerHTML = `${TRASH_ICON_SVG}<span>Delete</span>`;
+      deleteBtn.title = `Delete ${m.id}`;
+      deleteBtn.addEventListener('click', () => deleteModel(m.id));
+      action.appendChild(deleteBtn);
+
+      card.appendChild(info);
+      card.appendChild(action);
+      installedModelsList.appendChild(card);
+    });
+  }
+
+  async function loadRecommendedModels() {
+    if (!recommendedModelsList) return;
+    recommendedModelsList.innerHTML = '<div class="model-list-empty">Loading recommendations...</div>';
+    try {
+      const res = await fetch('/api/models/recommended');
+      const data = await res.json();
+      recommendedModelsCache = data.models || [];
+      renderRecommendedModels();
+      updateModelLibrarySearchUI();
+    } catch (e) {
+      recommendedModelsList.innerHTML = `<div class="model-list-empty">Could not load recommendations: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderRecommendedModels() {
+    if (!recommendedModelsList) return;
+    const models = recommendedModelsCache.filter(modelMatchesLibraryQuery);
+
+    if (recommendedModelsCount) {
+      recommendedModelsCount.textContent = modelLibraryQuery.trim()
+        ? `${models.length}/${recommendedModelsCache.length}`
+        : String(recommendedModelsCache.length);
+    }
+
+    if (recommendedModelsCache.length === 0) {
+      recommendedModelsList.innerHTML = '<div class="model-list-empty">No recommendations available.</div>';
+      return;
+    }
+    if (models.length === 0) {
+      recommendedModelsList.innerHTML = `<div class="model-list-empty">No recommended models match “${escapeHtml(modelLibraryQuery.trim())}”.</div>`;
+      return;
+    }
+
+    recommendedModelsList.innerHTML = '';
+    models.forEach((m) => {
+      const card = document.createElement('div');
+      card.className = 'model-card';
+
+      const info = document.createElement('div');
+      info.className = 'model-card-info';
+      const badges = [];
+      if (m.is_installed) badges.push('<span class="model-tag installed">Installed</span>');
+      if (m.is_compatible === false) badges.push('<span class="model-tag incompatible">Needs more RAM</span>');
+      info.innerHTML = `
+        <div class="model-card-title-row">
+          <span class="model-card-title">${escapeHtml(m.name)}</span>
+          ${badges.join('')}
+        </div>
+        <span class="model-card-id">${escapeHtml(m.id)}</span>
+        <span class="model-card-desc">${escapeHtml(m.description)} ${escapeHtml(m.approx_size)}.</span>
+      `;
+
+      const action = document.createElement('div');
+      action.className = 'model-card-action';
+      const pullBtn = document.createElement('button');
+      if (m.is_installed) {
+        pullBtn.className = 'btn-secondary';
+        pullBtn.innerHTML = `${CHECK_ICON_SVG}<span>Installed</span>`;
+        pullBtn.disabled = true;
+      } else {
+        pullBtn.className = 'btn-primary';
+        pullBtn.innerHTML = `${DOWNLOAD_ICON_SVG}<span>Download</span>`;
+        pullBtn.title = `Download ${m.id}`;
+        pullBtn.addEventListener('click', () => pullModel(m.id));
+      }
+      action.appendChild(pullBtn);
+
+      card.appendChild(info);
+      card.appendChild(action);
+      recommendedModelsList.appendChild(card);
+    });
+  }
+
+  async function deleteModel(modelName) {
+    if (!confirm(`Delete "${modelName}" from this computer?\n\nYou can download it again later.`)) return;
+    try {
+      const res = await fetch(`/api/models?model=${encodeURIComponent(modelName)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        let detail = `Server returned ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data.detail) detail = data.detail;
+        } catch (_) {}
+        throw new Error(detail);
+      }
+      await loadModels();
+      await refreshModelLibrary();
+    } catch (e) {
+      alert(`Could not delete ${modelName}: ${e.message}`);
+    }
+  }
+
+  async function pullModel(modelName) {
+    if (isDownloadingModel) {
+      alert('A model download is already in progress. Wait for it to finish first.');
+      return;
+    }
+
+    isDownloadingModel = true;
+    currentDownloadingModel = modelName;
+    if (btnPullCustomModel) btnPullCustomModel.disabled = true;
+    if (btnCancelDownload) btnCancelDownload.disabled = false;
+    if (modelDownloadStatus) modelDownloadStatus.style.display = 'flex';
+    if (modelDownloadLabel) modelDownloadLabel.textContent = `Downloading ${modelName}...`;
+    if (modelDownloadPercent) modelDownloadPercent.textContent = '0%';
+    if (modelDownloadProgressFill) modelDownloadProgressFill.style.width = '0%';
+    if (modelDownloadDetail) modelDownloadDetail.textContent = 'Contacting Ollama...';
+
+    let finished = false;
+
+    try {
+      const res = await fetch('/api/models/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName })
+      });
+      if (!res.ok) {
+        let detail = `Server returned ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data.detail) detail = data.detail;
+        } catch (_) {}
+        throw new Error(detail);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim().startsWith('data: ')) continue;
+          let event;
+          try {
+            event = JSON.parse(line.trim().slice(6));
+          } catch (_) {
+            continue;
+          }
+
+          if (event.type === 'progress') {
+            if (event.percent !== null && event.percent !== undefined) {
+              if (modelDownloadPercent) modelDownloadPercent.textContent = `${event.percent}%`;
+              if (modelDownloadProgressFill) modelDownloadProgressFill.style.width = `${Math.min(100, event.percent)}%`;
+              if (modelDownloadDetail) {
+                modelDownloadDetail.textContent = `${formatModelStatus(event.status)} — ${formatBytes(event.completed)} / ${formatBytes(event.total)}`;
+              }
+            } else if (modelDownloadDetail) {
+              modelDownloadDetail.textContent = formatModelStatus(event.status);
+            }
+          } else if (event.type === 'done') {
+            finished = true;
+            if (modelDownloadPercent) modelDownloadPercent.textContent = '100%';
+            if (modelDownloadProgressFill) modelDownloadProgressFill.style.width = '100%';
+            if (modelDownloadLabel) modelDownloadLabel.textContent = `${modelName} is ready`;
+            if (modelDownloadDetail) modelDownloadDetail.textContent = 'Download complete. It is now available in the model selector.';
+          } else if (event.type === 'cancelled') {
+            if (modelDownloadLabel) modelDownloadLabel.textContent = `Download cancelled`;
+            if (modelDownloadDetail) modelDownloadDetail.textContent = `${modelName} download was cancelled.`;
+            if (modelDownloadPercent) modelDownloadPercent.textContent = '';
+            if (modelDownloadProgressFill) modelDownloadProgressFill.style.width = '0%';
+            break;
+          } else if (event.type === 'error') {
+            throw new Error(event.error || 'Download failed.');
+          }
+        }
+      }
+
+      if (finished) {
+        customModelInput.value = '';
+        await loadModels();
+        await refreshModelLibrary();
+      }
+    } catch (e) {
+      if (modelDownloadLabel) modelDownloadLabel.textContent = `Download failed: ${modelName}`;
+      if (modelDownloadDetail) modelDownloadDetail.textContent = e.message;
+      if (modelDownloadPercent) modelDownloadPercent.textContent = '';
+      if (modelDownloadProgressFill) modelDownloadProgressFill.style.width = '0%';
+    } finally {
+      isDownloadingModel = false;
+      currentDownloadingModel = null;
+      if (btnPullCustomModel) btnPullCustomModel.disabled = false;
+      if (btnCancelDownload) btnCancelDownload.disabled = true;
+    }
+  }
+
+  // Cancel an in-progress download
+  async function cancelModelDownload() {
+    if (!currentDownloadingModel) return;
+    try {
+      await fetch(`/api/models/pull?model=${encodeURIComponent(currentDownloadingModel)}`, {
+        method: 'DELETE'
+      });
+      if (btnCancelDownload) btnCancelDownload.disabled = true;
+      if (modelDownloadDetail) modelDownloadDetail.textContent = 'Cancelling download…';
+    } catch (e) {
+      console.error('Cancel failed:', e);
+    }
+  }
+
+  function formatModelStatus(status) {
+    if (!status) return 'Working...';
+    const text = String(status).replace(/_/g, ' ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function formatBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+    const amount = value / Math.pow(1024, index);
+    return `${amount.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  }
+
+  // --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // Antigravity Projects / Workspaces
+  // --------------------------------------------------------------------------
+  async function loadActiveProjectAndProjects() {
+    try {
+      const pRes = await fetch('/api/projects');
+      projectsList = await pRes.json();
+      renderRecentProjects();
+
+      const aRes = await fetch('/api/projects/active');
+      const activeData = await aRes.json();
+      if (activeData && activeData.id) {
+        setProjectActiveState(activeData);
+      } else {
+        setGlobalWorkspaceState();
+      }
+    } catch (e) {
+      console.error('Error loading projects:', e);
+      setGlobalWorkspaceState();
+    }
+  }
+
+  function setProjectActiveState(proj) {
+    currentProjectId = proj.id;
+    currentProjectPath = proj.path;
+    currentProjectName = proj.name;
+    if (activeProjectLabel) {
+      activeProjectLabel.textContent = proj.name;
+      activeProjectLabel.title = `Project: ${proj.name}\nPath: ${proj.path}`;
+    }
+    if (btnDropdownProjectDetails) {
+      btnDropdownProjectDetails.style.display = 'flex';
+    }
+    renderRecentProjects();
+    fetchConversations(currentProjectId);
+  }
+
+  function setGlobalWorkspaceState() {
+    currentProjectId = null;
+    currentProjectPath = null;
+    currentProjectName = null;
+    if (activeProjectLabel) {
+      activeProjectLabel.textContent = 'Global Workspace';
+      activeProjectLabel.title = 'Global Scratch Workspace (No Project)';
+    }
+    if (btnDropdownProjectDetails) {
+      btnDropdownProjectDetails.style.display = 'none';
+    }
+    renderRecentProjects();
+    fetchConversations(null);
+  }
+
+  function renderRecentProjects() {
+    if (!recentProjectsContainer) return;
+    recentProjectsContainer.innerHTML = '';
+    if (!projectsList || projectsList.length === 0) {
+      recentProjectsContainer.innerHTML = '<div style="padding: 6px 8px; font-size: 11px; color: var(--text-dim);">No recent projects</div>';
+      return;
+    }
+
+    projectsList.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'recent-proj-item' + (p.id === currentProjectId ? ' active' : '');
+
+      const left = document.createElement('div');
+      left.className = 'recent-proj-left';
+      left.innerHTML = `
+        <span class="recent-proj-name">${escapeHtml(p.name)}</span>
+        <span class="recent-proj-path">${escapeHtml(p.path)}</span>
+      `;
+      left.addEventListener('click', async () => {
+        if (projectDropdownMenu) projectDropdownMenu.style.display = 'none';
+        await switchProject(p.id);
+      });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'recent-proj-remove';
+      removeBtn.innerHTML = '&times;';
+      removeBtn.title = 'Remove project from history';
+      removeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await deleteProject(p.id);
+      });
+
+      item.appendChild(left);
+      item.appendChild(removeBtn);
+      recentProjectsContainer.appendChild(item);
+    });
+  }
+
+  async function switchProject(projectId) {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/open`, { method: 'POST' });
+      if (res.ok) {
+        const proj = await res.json();
+        setProjectActiveState(proj);
+      }
+    } catch (e) {
+      console.error('Failed to switch project:', e);
+    }
+  }
+
+  async function deleteProject(projectId) {
+    if (!confirm('Remove this project from workspace history? (Files will remain on disk)')) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      if (res.ok) {
+        projectsList = projectsList.filter((p) => p.id !== projectId);
+        if (currentProjectId === projectId) {
+          await closeActiveProject();
+        } else {
+          renderRecentProjects();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to delete project:', e);
+    }
+  }
+
+  async function closeActiveProject() {
+    try {
+      await fetch('/api/projects/close', { method: 'POST' });
+      setGlobalWorkspaceState();
+    } catch (e) {
+      console.error('Failed to close active project:', e);
+    }
+  }
+
+  async function handleSaveOrOpenProject() {
+    const path = projectPathInput.value.trim();
+    if (!path) {
+      alert('Please specify a project folder path.');
+      return;
+    }
+    const name = projectNameInput.value.trim();
+    const instructions = projectInstructionsInput.value;
+
+    try {
+      if (projectModalTitle.textContent.startsWith('Project:') && currentProjectId) {
+        const res = await fetch(`/api/projects/${currentProjectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name || undefined, instructions: instructions })
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          setProjectActiveState(updated);
+          projectModal.classList.remove('open');
+        } else {
+          alert('Failed to update project settings.');
+        }
+      } else {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, name, instructions })
+        });
+        if (res.ok) {
+          const proj = await res.json();
+          const pRes = await fetch('/api/projects');
+          projectsList = await pRes.json();
+          setProjectActiveState(proj);
+          projectModal.classList.remove('open');
+        } else {
+          alert('Failed to open or create project.');
+        }
+      }
+    } catch (e) {
+      console.error('Error opening project:', e);
+      alert('Error opening project: ' + e.message);
+    }
+  }
+
+  function updateModifiedFilesBadge() {
+    if (!btnReviewChanges || !modifiedFilesCount) return;
+    if (modifiedFilesMap.size > 0) {
+      btnReviewChanges.style.display = 'flex';
+      modifiedFilesCount.textContent = modifiedFilesMap.size;
+    } else {
+      btnReviewChanges.style.display = 'none';
+    }
+  }
+
+  function renderModifiedFilesList() {
+    if (!modifiedFilesList) return;
+    modifiedFilesList.innerHTML = '';
+    if (diffViewerWrapper) diffViewerWrapper.style.display = 'none';
+    if (modifiedFilesMap.size === 0) {
+      modifiedFilesList.innerHTML = '<div style="color: var(--text-dim); font-size: 13px;">No files modified yet in this session.</div>';
+      return;
+    }
+    modifiedFilesMap.forEach((meta, path) => {
+      const item = document.createElement('div');
+      item.className = 'modified-file-item';
+      item.innerHTML = `
+        <span class="modified-file-name">${escapeHtml(path)}</span>
+        <span class="modified-file-badge ${meta.action}">${escapeHtml(meta.action)}</span>
+      `;
+      item.addEventListener('click', () => {
+        if (!diffViewerWrapper || !diffViewerFileName || !diffViewerCode) return;
+        diffViewerFileName.textContent = `${meta.action.toUpperCase()}: ${path}`;
+        diffViewerWrapper.style.display = 'block';
+        diffViewerCode.textContent = `File Path: ${path}\nAction: ${meta.action.toUpperCase()}\nTool: ${meta.tool}\nRecorded: ${new Date(meta.timestamp).toLocaleTimeString()}`;
+      });
+      modifiedFilesList.appendChild(item);
+    });
+  }
+
+  // --------------------------------------------------------------------------
   // Conversations (Chat History)
   // --------------------------------------------------------------------------
-  async function fetchConversations() {
+  async function fetchConversations(projectId = currentProjectId) {
     try {
-      const res = await fetch('/api/conversations');
+      const url = projectId ? `/api/conversations?project_id=${encodeURIComponent(projectId)}` : '/api/conversations';
+      const res = await fetch(url);
       conversations = await res.json();
 
       if (conversations.length === 0) {
