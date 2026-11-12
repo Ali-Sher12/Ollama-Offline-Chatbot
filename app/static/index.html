@@ -352,6 +352,137 @@
     </div>
   </div>
 
+  <!-- Modal: Agent Permission Approval -->
+  <div class="modal-overlay permission-overlay" id="permissionModal">
+    <div class="modal-dialog permission-dialog">
+      <div class="modal-header permission-header">
+        <div class="permission-heading">
+          <div class="permission-shield">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <path d="M9 12l2 2 4-4"></path>
+            </svg>
+          </div>
+          <div>
+            <h3 class="modal-title">Permission Required</h3>
+            <div class="permission-subtitle" id="permissionSubtitle">The agent is paused and needs your approval.</div>
+          </div>
+        </div>
+        <span class="permission-tool" id="permissionToolName"></span>
+      </div>
+      <div class="modal-body permission-body">
+        <div class="permission-action">
+          <div class="permission-action-main">
+            <div class="permission-action-title" id="permissionTitle"></div>
+            <div class="permission-action-detail" id="permissionDetail"></div>
+          </div>
+          <span class="permission-risk medium" id="permissionRisk">Medium risk</span>
+        </div>
+        <div class="permission-preview" id="permissionPreviewWrapper">
+          <div class="permission-preview-label" id="permissionPreviewLabel"></div>
+          <pre class="permission-preview-code" id="permissionPreview"></pre>
+        </div>
+        <div class="permission-note">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <span>The agent will continue immediately after you respond. Denying lets it adapt without running this action.</span>
+        </div>
+      </div>
+      <div class="modal-footer permission-footer">
+        <button class="btn-secondary permission-deny" id="btnDenyPermission">Deny</button>
+        <button class="btn-secondary" id="btnAlwaysAllowPermission">Always Allow (this task)</button>
+        <button class="btn-primary" id="btnAllowPermission">Allow Once</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Local Model Library -->
+  <div class="modal-overlay" id="modelsModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Local Model Library</h3>
+        <button class="icon-btn-sm" id="btnCloseModels">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="model-library-search-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="modelLibrarySearchInput" class="model-library-search-input" placeholder="Search installed and recommended models..." autocomplete="off" spellcheck="false">
+          <button type="button" class="model-search-clear" id="modelLibrarySearchClear" title="Clear search" style="display: none;">&times;</button>
+        </div>
+        <div class="model-library-search-status" id="modelLibrarySearchStatus"></div>
+
+        <div class="form-group">
+          <label class="form-label">Download Any Ollama Model</label>
+          <div class="model-download-input-row">
+            <input type="text" id="customModelInput" class="form-input" placeholder="e.g. llama3.2:3b, qwen2.5-coder:7b, mistral">
+            <button class="btn-primary" id="btnPullCustomModel">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v12"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <path d="M4 21h16"></path>
+              </svg>
+              <span>Download</span>
+            </button>
+          </div>
+          <div class="form-hint">Downloads happen inside the app. No terminal or helper script needed.</div>
+        </div>
+
+        <div id="modelDownloadStatus" class="model-download-status" style="display: none;">
+          <div class="model-download-status-row">
+            <span id="modelDownloadLabel">Preparing download...</span>
+            <span id="modelDownloadPercent">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="modelDownloadProgressFill" style="width: 0%;"></div>
+          </div>
+          <div class="model-download-status-row" style="margin-top:4px;">
+            <div class="form-hint" id="modelDownloadDetail"></div>
+            <button class="btn-danger" id="btnCancelDownload" style="padding:4px 10px;font-size:11px;">
+              ✕ Cancel
+            </button>
+          </div>
+        </div>
+
+        <div class="model-library-section">
+          <h4 class="model-library-heading">
+            <span>Installed Local Models</span>
+            <span class="model-count" id="installedModelsCount"></span>
+          </h4>
+          <div class="model-list" id="installedModelsList">
+            <div class="model-list-empty">Loading installed models...</div>
+          </div>
+        </div>
+
+        <div class="model-library-section">
+          <h4 class="model-library-heading">
+            <span>Recommended Downloads</span>
+            <span class="model-count" id="recommendedModelsCount"></span>
+          </h4>
+          <div class="model-list" id="recommendedModelsList">
+            <div class="model-list-empty">Loading recommendations...</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btnRefreshModels">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          <span>Refresh</span>
+        </button>
+        <button class="btn-primary" id="btnDismissModels">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Analytics & Budget Tracker -->
   <div class="modal-overlay" id="analyticsModal">
     <div class="modal-dialog">
