@@ -1682,18 +1682,33 @@
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
+      // Capture the clicked row and its counterpart before touching the DOM so
+      // a row that predates its server id is still removed together with its mate.
+      const clickedRow  = row && row.isConnected ? row : null;
+      const clickedIsUser = !!(clickedRow && clickedRow.classList.contains('user'));
+      const partnerRow = clickedRow
+        ? (clickedIsUser ? clickedRow.nextElementSibling : clickedRow.previousElementSibling)
+        : null;
+
       // Remove every row the server actually deleted (both halves of the pair).
       const deletedIds = new Set(data.deleted_ids || []);
       messagesContainer.querySelectorAll('.message-row').forEach((el) => {
-        if (deletedIds.has(el.dataset.msgId)) el.remove();
+        if (el.dataset.msgId && deletedIds.has(el.dataset.msgId)) el.remove();
       });
 
       // Safety net for rows that were rendered before their id was known.
-      if (row && row.parentNode) row.remove();
-
-      if (!messagesContainer.querySelector('.message-row')) {
-        renderMessages([]);
+      if (clickedRow && clickedRow.isConnected) clickedRow.remove();
+      if (
+        partnerRow && partnerRow.isConnected &&
+        partnerRow.classList.contains('message-row') &&
+        partnerRow.classList.contains('user') !== clickedIsUser
+      ) {
+        partnerRow.remove();
       }
+
+      // Re-sync with the database so a stale half of the pair can never remain
+      // visible even if an SSE id was missed.
+      await loadConversation(currentConversationId);
     } catch (err) {
       console.error('Failed to delete message pair:', err);
       alert('Failed to delete message: ' + err.message);

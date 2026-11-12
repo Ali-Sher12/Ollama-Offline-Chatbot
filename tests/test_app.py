@@ -160,6 +160,40 @@ class TestOllamaChatbot(unittest.TestCase):
 
         db.delete_conversation(conv["id"])
 
+    def test_delete_message_pair_with_identical_timestamps(self):
+        """Pairs stay aligned even when messages share the same timestamp."""
+        conv = db.create_conversation(title="Tie Pair Test", provider="ollama", model="llama3.2:1b")
+        user_one = db.add_message(conv["id"], "user", "First prompt")
+        assistant_one = db.add_message(conv["id"], "assistant", "First reply")
+        user_two = db.add_message(conv["id"], "user", "Second prompt")
+        assistant_two = db.add_message(conv["id"], "assistant", "Second reply")
+
+        # Force every row to the same timestamp so only the rowid tie-breaker
+        # can keep them in insertion order.
+        with db._get_connection() as conn:
+            conn.execute(
+                "UPDATE messages SET created_at = ? WHERE conversation_id = ?",
+                ("2026-01-01T00:00:00+00:00", conv["id"])
+            )
+            conn.commit()
+
+        ordered = [m["id"] for m in db.get_conversation(conv["id"])["messages"]]
+        self.assertEqual(
+            ordered,
+            [user_one["id"], assistant_one["id"], user_two["id"], assistant_two["id"]]
+        )
+
+        result = db.delete_message_pair(conv["id"], assistant_two["id"])
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            set(result["deleted_ids"]),
+            {user_two["id"], assistant_two["id"]}
+        )
+        remaining = [m["id"] for m in db.get_conversation(conv["id"])["messages"]]
+        self.assertEqual(remaining, [user_one["id"], assistant_one["id"]])
+
+        db.delete_conversation(conv["id"])
+
     def test_append_chat_option(self):
         conv = db.create_conversation(title="Append Test", provider="ollama", model="llama3.2:1b")
         # Turn 1

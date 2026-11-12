@@ -249,7 +249,12 @@ class Database:
             if not conv:
                 return None
             
-            cursor.execute("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC", (conv_id,))
+            # rowid is a tie-breaker so messages saved in the same microsecond
+            # come back in insertion order (matching delete_message_pair()).
+            cursor.execute(
+                "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC",
+                (conv_id,)
+            )
             messages = cursor.fetchall()
             
             msg_list = []
