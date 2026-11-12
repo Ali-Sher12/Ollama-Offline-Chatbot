@@ -16,6 +16,10 @@ from app.services.file_service import file_service
 from app.services.rag_service import rag_service
 from app.services.llm_service import llm_service
 from app.services.analytics_service import analytics_service
+from app.services.project_service import project_service
+from app.agent.orchestrator import agent_orchestrator
+from app.agent.tool_registry import tool_registry
+from app.agent.permissions import permission_broker
 
 app = FastAPI(title="Ollama Desktop Chatbot", version="2.0.0")
 
@@ -38,20 +42,125 @@ class ChatRequest(BaseModel):
     message: str
     attachments: Optional[List[Dict[str, Any]]] = None
     use_web_search: bool = False
+    web_search_results_count: Optional[int] = 10
     append_chat: Optional[bool] = True
     provider: Optional[str] = None
     model: Optional[str] = None
+    agent_mode: Optional[bool] = False
+    project_id: Optional[str] = None
 
 class CreateConversationRequest(BaseModel):
     title: Optional[str] = "New Chat"
     provider: Optional[str] = None
     model: Optional[str] = None
+    project_id: Optional[str] = None
+
+class CreateProjectRequest(BaseModel):
+    path: str
+    name: Optional[str] = None
+    instructions: Optional[str] = None
+
+class UpdateProjectRequest(BaseModel):
+    name: Optional[str] = None
+    path: Optional[str] = None
+    instructions: Optional[str] = None
 
 class UpdateTitleRequest(BaseModel):
     title: str
 
 class SettingsUpdateRequest(BaseModel):
     settings: Dict[str, Any]
+
+class PullModelRequest(BaseModel):
+    model: str
+
+
+class PermissionDecisionRequest(BaseModel):
+    decision: str
+
+
+@app.get("/api/system/specs")
+async def get_system_specs():
+    """Retrieve host hardware specifications and recommendation thresholds."""
+    return llm_service.get_device_specs()
+
+
+@app.get("/api/projects")
+async def list_projects():
+    """List all registered projects, most recently accessed first."""
+    return project_service.list_projects()
+
+
+@app.post("/api/projects")
+async def create_or_open_project(req: CreateProjectRequest):
+    """Create or open a project by directory path."""
+    return project_service.open_or_create_project(
+        path_str=req.path,
+        name=req.name,
+        instructions=req.instructions,
+        set_active=True
+    )
+
+
+@app.get("/api/projects/active")
+async def get_active_project():
+    """Get the currently active project if any."""
+    active = project_service.get_active_project()
+    return active or {"active": None}
+
+
+@app.post("/api/projects/close")
+async def close_project():
+    """Close the active project."""
+    project_service.close_active_project()
+    return {"status": "ok", "active": None}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(project_id: str):
+    """Get project details, overview and instructions."""
+    proj = project_service.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    overview = project_service.get_project_overview(proj["path"])
+    instructions = project_service.get_project_agents_instructions(proj["path"])
+    return {
+        **proj,
+        "overview": overview,
+        "instructions_content": instructions
+    }
+
+
+@app.patch("/api/projects/{project_id}")
+async def update_project(project_id: str, req: UpdateProjectRequest):
+    """Update project metadata or instructions."""
+    proj = project_service.update_project(
+        project_id=project_id,
+        name=req.name,
+        path=req.path,
+        instructions=req.instructions
+    )
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str):
+    """Unregister a project (does not delete directory on disk)."""
+    success = project_service.delete_project(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/projects/{project_id}/open")
+async def open_project(project_id: str):
+    """Set project as active."""
+    proj = project_service.set_active_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
 
 
 @app.get("/api/models")
@@ -60,10 +169,63 @@ async def get_models():
     return llm_service.get_all_available_models()
 
 
+@app.get("/api/models/recommended")
+async def get_recommended_models():
+    """Curated local models users can download directly from the app."""
+    return llm_service.get_recommended_models()
+
+
+# Active download cancellation registry: model_name -> threading.Event
+import threading
+_pull_cancel_flags: Dict[str, threading.Event] = {}
+_pull_lock = threading.Lock()
+
+
+@app.post("/api/models/pull")
+async def pull_model(req: PullModelRequest):
+    """Download (pull) a local Ollama model and stream progress as SSE."""
+    cancel_event = threading.Event()
+    with _pull_lock:
+        _pull_cancel_flags[req.model] = cancel_event
+
+    def pull_event_generator():
+        try:
+            for event in llm_service.pull_ollama_model(req.model, cancel_event=cancel_event):
+                if cancel_event.is_set():
+                    yield f"data: {json.dumps({'type': 'cancelled', 'model': req.model})}\n\n"
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            with _pull_lock:
+                _pull_cancel_flags.pop(req.model, None)
+
+    return StreamingResponse(pull_event_generator(), media_type="text/event-stream")
+
+
+@app.delete("/api/models/pull")
+async def cancel_pull_model(model: str):
+    """Cancel an in-progress model download."""
+    with _pull_lock:
+        flag = _pull_cancel_flags.get(model)
+    if flag:
+        flag.set()
+        return {"status": "cancelling", "model": model}
+    return {"status": "not_downloading", "model": model}
+
+
+@app.delete("/api/models")
+async def delete_model(model: str):
+    """Delete an installed local Ollama model."""
+    result = llm_service.delete_ollama_model(model)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to delete model"))
+    return result
+
+
 @app.get("/api/conversations")
-async def list_conversations():
-    """List all saved conversations."""
-    return db.list_conversations()
+async def list_conversations(project_id: Optional[str] = None):
+    """List all saved conversations, optionally filtered by project_id."""
+    return db.list_conversations(project_id=project_id)
 
 
 @app.post("/api/conversations")
