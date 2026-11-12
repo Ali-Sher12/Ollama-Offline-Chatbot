@@ -1599,7 +1599,7 @@
       metaDiv.className = 'bubble-meta';
       const tokSec = meta.durationSec > 0 ? (meta.completionTokens / meta.durationSec).toFixed(1) : 0;
       metaDiv.innerHTML = `
-        <span>${meta.durationSec || 0}s (${tokSec} tok/s)</span>
+        <span>${formatDuration(meta.durationSec)} (${tokSec} tok/s)</span>
         <span>&bull;</span>
         <span>${meta.promptTokens || 0} in / ${meta.completionTokens || 0} out</span>
       `;
@@ -1957,7 +1957,7 @@
                 }
                 const durPill = card.querySelector('.tool-duration-pill');
                 if (durPill) {
-                  durPill.textContent = `${event.duration_sec || 0}s`;
+                  durPill.textContent = formatDuration(event.duration_sec, event.duration_display);
                 }
                 const outputSec = card.querySelector('.tool-output-section');
                 const preview = card.querySelector('.result-preview code');
@@ -2006,7 +2006,7 @@
                 ? `<span>&bull; ${escapeHtml(doneStatus.replace(/_/g, ' '))}</span>`
                 : '';
               metaDiv.innerHTML = `
-                <span>${event.duration_sec}s (${event.tokens_per_sec} tok/s)</span>
+                <span>${formatDuration(event.duration_sec, event.duration_display)} (${event.tokens_per_sec} tok/s)</span>
                 <span>&bull;</span>
                 <span>${event.prompt_tokens} in / ${event.completion_tokens} out</span>
                 ${event.iterations ? `<span>&bull; ${event.iterations} step(s)</span>` : ''}
@@ -2064,6 +2064,13 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  function formatDuration(seconds, display) {
+    if (display) return display;
+    if (!seconds || seconds <= 0) return '0 ms';
+    if (seconds < 1) return `${Math.max(1, Math.round(seconds * 1000))} ms`;
+    return `${Number(seconds).toFixed(2)} s`;
   }
 
   function getToolSummary(name, args) {

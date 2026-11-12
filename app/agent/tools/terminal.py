@@ -107,7 +107,7 @@ def run_terminal(
     exec_timeout = _clamp_timeout(timeout)
     env = _build_env(workspace, env_vars)
 
-    start = time.time()
+    start = time.perf_counter()
     try:
         result = subprocess.run(
             command,
@@ -120,7 +120,7 @@ def run_terminal(
             timeout=exec_timeout,
             env=env,
         )
-        duration = round(time.time() - start, 2)
+        duration = round(time.perf_counter() - start, 4)
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""
@@ -133,25 +133,25 @@ def run_terminal(
             "stdout": _truncate(stdout, 32_000),
             "stderr": _truncate(stderr, 8_000),
             "cwd": str(work_dir),
-            "duration_sec": duration,
+            **_duration_fields(duration),
             "command": command,
             "error": None if success else f"Exit code {exit_code}" + (f"\n{stderr.strip()}" if stderr.strip() else ""),
         }
 
     except subprocess.TimeoutExpired:
-        duration = round(time.time() - start, 2)
+        duration = round(time.perf_counter() - start, 4)
         return {
             "success": False,
             "exit_code": -1,
             "stdout": "",
             "stderr": f"Timed out after {exec_timeout}s",
             "cwd": str(work_dir),
-            "duration_sec": duration,
+            **_duration_fields(duration),
             "command": command,
             "error": f"Command exceeded timeout of {exec_timeout} seconds. Use a larger timeout or break the task into smaller steps.",
         }
     except Exception as e:
-        duration = round(time.time() - start, 2)
+        duration = round(time.perf_counter() - start, 4)
         return _error(str(e), duration=duration, cwd=str(work_dir), command=command)
 
 
@@ -407,6 +407,19 @@ def _truncate(text: str, limit: int) -> str:
     return text[:half] + f"\n\n... [{len(text) - limit} characters truncated] ...\n\n" + text[-half:]
 
 
+def _duration_fields(seconds: float) -> Dict[str, Any]:
+    """Return human- and machine-readable elapsed time fields."""
+    seconds = max(0.0, float(seconds or 0.0))
+    milliseconds = max(1, int(round(seconds * 1000))) if seconds > 0 else 0
+    return {
+        "duration_sec": round(seconds, 4),
+        "duration_ms": milliseconds,
+        "duration_display": (
+            f"{milliseconds} ms" if milliseconds < 1000 else f"{seconds:.2f} s"
+        ),
+    }
+
+
 def _error(msg: str, duration: float = 0.0, cwd: str = "", command: str = "") -> Dict[str, Any]:
     return {
         "success": False,
@@ -414,7 +427,7 @@ def _error(msg: str, duration: float = 0.0, cwd: str = "", command: str = "") ->
         "stdout": "",
         "stderr": msg,
         "cwd": cwd,
-        "duration_sec": duration,
+        **_duration_fields(duration),
         "command": command,
         "error": msg,
     }

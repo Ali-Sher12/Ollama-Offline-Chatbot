@@ -94,8 +94,26 @@ VISION TOOLS:
 10. CLEAR FINAL REPORT: When done, summarize: what you did, what files were created/modified,
     what commands were run, and the verification results.
 
+11. ACCURATE TIMING: Tool results include `duration_sec`, `duration_ms`, and `duration_display`.
+    Use `duration_display` when reporting how long an operation took. Never report "0.0 seconds"
+    for a completed operation; very fast operations are reported in milliseconds.
+
 ═══════════════════════════════════════════════════════════════════════════
 """
+
+
+def _duration_fields(seconds: float) -> Dict[str, Any]:
+    """Return human- and machine-readable elapsed time fields."""
+    seconds = max(0.0, float(seconds or 0.0))
+    milliseconds = max(1, int(round(seconds * 1000))) if seconds > 0 else 0
+    return {
+        "duration_sec": round(seconds, 4),
+        "duration_ms": milliseconds,
+        "duration_display": (
+            f"{milliseconds} ms" if milliseconds < 1000 else f"{seconds:.2f} s"
+        ),
+    }
+
 
 class AgentOrchestrator:
     """
@@ -133,7 +151,7 @@ class AgentOrchestrator:
 
         task = TaskState(objective=objective, conversation_id=conversation_id)
         self.active_tasks[task.task_id] = task
-        start_time = time.time()
+        start_time = time.perf_counter()
         # Agent execution is uncapped by default. A positive max_iterations
         # may still be supplied programmatically for callers that want a cap.
         max_iter = int(max_iterations) if max_iterations else 0
@@ -144,7 +162,7 @@ class AgentOrchestrator:
         ready, readiness_error = llm_service.check_agent_readiness(provider, model)
         if not ready:
             task.status = "failed"
-            duration = round(time.time() - start_time, 2)
+            duration = round(time.perf_counter() - start_time, 3)
             logger.error("Agent preflight failed: %s", readiness_error)
             self.active_tasks.pop(task.task_id, None)
             permission_broker.cleanup_task(task.task_id)
@@ -160,7 +178,7 @@ class AgentOrchestrator:
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "total_tokens": 0,
-                "duration_sec": duration,
+                **_duration_fields(duration),
                 "tokens_per_sec": 0.0,
                 "estimated_cost": 0.0,
             }
@@ -396,7 +414,7 @@ class AgentOrchestrator:
                                     "tool_name": t_name,
                                     "arguments": t_args,
                                     "result": denied_output,
-                                    "duration_sec": 0.0
+                                    **_duration_fields(0.0)
                                 }
                                 messages.append({
                                     "role": "tool",
@@ -418,10 +436,11 @@ class AgentOrchestrator:
                                 # A normal denial: let the model see the result and adapt.
                                 continue
 
-                    t_start = time.time()
+                    t_start = time.perf_counter()
                     tool_output = tool_registry.execute_tool(t_name, t_args)
-                    t_dur = round(time.time() - t_start, 2)
-                    tool_output["duration_sec"] = t_dur
+                    t_dur_fields = _duration_fields(time.perf_counter() - t_start)
+                    t_dur = t_dur_fields["duration_sec"]
+                    tool_output.update(t_dur_fields)
 
                     task.record_tool_result(call_id=call_id, tool_name=t_name, result=tool_output)
 
@@ -451,7 +470,9 @@ class AgentOrchestrator:
                         "tool_name": t_name,
                         "arguments": t_args,
                         "result": tool_output,
-                        "duration_sec": t_dur
+                        "duration_sec": t_dur,
+                        "duration_ms": t_dur_fields["duration_ms"],
+                        "duration_display": t_dur_fields["duration_display"]
                     }
 
                     # Add tool result message to conversation context
@@ -515,7 +536,7 @@ class AgentOrchestrator:
             accumulated_final_answer += notice
             yield {"type": "chunk", "content": notice}
 
-        duration = round(time.time() - start_time, 2)
+        duration = round(time.perf_counter() - start_time, 3)
         task.total_prompt_tokens = total_prompt_tokens
         task.total_completion_tokens = total_completion_tokens
 
@@ -537,7 +558,7 @@ class AgentOrchestrator:
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
             "total_tokens": total_prompt_tokens + total_completion_tokens,
-            "duration_sec": duration,
+            **_duration_fields(duration),
             "tokens_per_sec": round(total_completion_tokens / max(0.01, duration), 1),
             "estimated_cost": estimated_cost
         }
