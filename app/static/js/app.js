@@ -1852,7 +1852,14 @@
           try {
             const event = JSON.parse(jsonStr);
 
-            if (event.type === 'search_results') {
+            if (event.type === 'user_message') {
+              // The server has persisted the user turn and may have created the
+              // conversation (first message). Keep both sides in sync.
+              if (!currentConversationId && event.conversation_id) {
+                currentConversationId = event.conversation_id;
+              }
+              setMessageId(userRow, event.message_id);
+            } else if (event.type === 'search_results') {
               const srCard = document.createElement('div');
               srCard.className = 'search-citations';
               let citationsHtml = `<div class="citation-header">Web Search Citations:</div>`;
@@ -1861,30 +1868,170 @@
               });
               srCard.innerHTML = citationsHtml;
               botBubble.insertBefore(srCard, botContentDiv);
+            } else if (event.type === 'agent_start') {
+              currentAgentTaskId = event.task_id;
+              const banner = document.createElement('div');
+              banner.className = 'agent-banner';
+              const stepLimit = event.max_iterations > 0 ? `${event.max_iterations} max steps` : 'unlimited steps';
+              const permissionLabel = event.permission_mode === 'always_ask' ? 'Always Ask' : 'Allow All';
+              banner.innerHTML = `<div class="agent-banner-dot"></div><span>Agent Mode Active: Autonomous Execution (${stepLimit} · ${permissionLabel})</span>`;
+              botBubble.insertBefore(banner, botContentDiv);
+              botContentDiv.innerHTML = '<em>Agent started. Planning the first step...</em>';
+            } else if (event.type === 'permission_request') {
+              enqueuePermissionRequest(event);
+            } else if (event.type === 'permission_resolved') {
+              handlePermissionResolved(event);
+            } else if (event.type === 'agent_step') {
+              let stepPill = botBubble.querySelector('.agent-step-indicator');
+              if (!stepPill) {
+                stepPill = document.createElement('div');
+                stepPill.className = 'agent-step-indicator';
+                botBubble.insertBefore(stepPill, botContentDiv);
+              }
+              stepPill.innerHTML = `<span>⚙</span> <span>${escapeHtml(event.message)}</span>`;
+              scrollToBottom();
+            } else if (event.type === 'agent_thought') {
+              const thought = document.createElement('div');
+              thought.className = 'agent-thought-block';
+              thought.innerHTML = `<strong>Reasoning:</strong><br>${renderMarkdown(event.content)}`;
+              botBubble.insertBefore(thought, botContentDiv);
+              scrollToBottom();
+            } else if (event.type === 'tool_call') {
+              const card = document.createElement('div');
+              card.className = 'tool-card running open';
+              card.id = `tool-${event.call_id}`;
+
+              let badgeClass = 'terminal';
+              if (event.tool_name.includes('file')) badgeClass = 'filesystem';
+              else if (event.tool_name.includes('docx')) badgeClass = 'docx';
+              else if (event.tool_name.includes('image')) badgeClass = 'vision';
+
+              const argsStr = JSON.stringify(event.arguments, null, 2);
+
+              card.innerHTML = `
+                <div class="tool-card-header" onclick="this.parentElement.classList.toggle('open')">
+                  <div class="tool-card-header-left">
+                    <span class="tool-badge ${badgeClass}">${escapeHtml(event.tool_name)}</span>
+                    <span class="tool-card-title">${escapeHtml(getToolSummary(event.tool_name, event.arguments))}</span>
+                  </div>
+                  <div class="tool-card-header-right">
+                    <span class="tool-duration-pill">executing...</span>
+                    <div class="tool-status-dot running"></div>
+                    <span class="tool-toggle-icon">&#9662;</span>
+                  </div>
+                </div>
+                <div class="tool-card-body">
+                  <div class="tool-section-label">Input Arguments:</div>
+                  <pre class="tool-code-preview"><code>${escapeHtml(argsStr)}</code></pre>
+                  <div class="tool-output-section" style="display: none;">
+                    <div class="tool-section-label">Execution Result:</div>
+                    <pre class="tool-code-preview result-preview"><code></code></pre>
+                  </div>
+                </div>
+              `;
+              botBubble.insertBefore(card, botContentDiv);
+              scrollToBottom();
+            } else if (event.type === 'tool_result') {
+              const card = document.getElementById(`tool-${event.call_id}`);
+              if (card) {
+                card.classList.remove('running');
+                const isSuccess = event.result && event.result.success !== false;
+                if (!isSuccess) card.classList.add('error');
+
+                // Only record file changes after the tool actually succeeds.
+                if (isSuccess && event.arguments &&
+                    (event.tool_name.includes('file') || event.tool_name.includes('edit') || event.tool_name.includes('write'))) {
+                  const targetPath = event.arguments.file_path || event.arguments.target_path || event.arguments.path;
+                  if (targetPath) {
+                    let action = 'modified';
+                    if (event.tool_name === 'write_file') action = 'created';
+                    else if (event.tool_name === 'delete_file') action = 'deleted';
+                    modifiedFilesMap.set(targetPath, { action, tool: event.tool_name, timestamp: Date.now() });
+                    updateModifiedFilesBadge();
+                  }
+                }
+
+                const statusDot = card.querySelector('.tool-status-dot');
+                if (statusDot) {
+                  statusDot.className = `tool-status-dot ${isSuccess ? 'success' : 'error'}`;
+                }
+                const durPill = card.querySelector('.tool-duration-pill');
+                if (durPill) {
+                  durPill.textContent = `${event.duration_sec || 0}s`;
+                }
+                const outputSec = card.querySelector('.tool-output-section');
+                const preview = card.querySelector('.result-preview code');
+                if (outputSec && preview) {
+                  outputSec.style.display = 'block';
+                  preview.textContent = JSON.stringify(event.result, null, 2);
+                }
+              }
+              scrollToBottom();
             } else if (event.type === 'chunk') {
               accumulatedText += event.content;
               botContentDiv.innerHTML = renderMarkdown(accumulatedText);
               highlightCodeBlocks(botBubble);
               scrollToBottom();
             } else if (event.type === 'done') {
+              clearPermissionPrompts();
               sessionTokens += (event.total_tokens || 0);
               sessionTokensCount.textContent = `${sessionTokens} tokens`;
+
+              const doneStatus = event.status || 'completed';
+
+              if (doneStatus === 'failed') {
+                const message = event.error || agentErrorText || event.final_answer ||
+                  'The agent stopped before completing the task.';
+                botContentDiv.innerHTML = `
+                  <div class="agent-error-block">
+                    <div class="agent-error-title">Agent task failed</div>
+                    <div>${escapeHtml(message)}</div>
+                  </div>`;
+              } else if (doneStatus === 'cancelled') {
+                botContentDiv.innerHTML = `
+                  <div class="agent-error-block cancelled">
+                    <div class="agent-error-title">Agent task cancelled</div>
+                    <div>The task was stopped before it could finish.</div>
+                  </div>`;
+              } else if (event.final_answer && !accumulatedText) {
+                // If agent mode produced a final answer and chunk was not sent
+                botContentDiv.innerHTML = renderMarkdown(event.final_answer);
+                highlightCodeBlocks(botBubble);
+              }
 
               // Append metrics footnote
               const metaDiv = document.createElement('div');
               metaDiv.className = 'bubble-meta';
+              const statusLabel = doneStatus !== 'completed'
+                ? `<span>&bull; ${escapeHtml(doneStatus.replace(/_/g, ' '))}</span>`
+                : '';
               metaDiv.innerHTML = `
                 <span>${event.duration_sec}s (${event.tokens_per_sec} tok/s)</span>
                 <span>&bull;</span>
                 <span>${event.prompt_tokens} in / ${event.completion_tokens} out</span>
+                ${event.iterations ? `<span>&bull; ${event.iterations} step(s)</span>` : ''}
+                ${statusLabel}
                 ${event.estimated_cost > 0 ? `<span>&bull; $${event.estimated_cost.toFixed(4)}</span>` : ''}
               `;
               botBubble.appendChild(metaDiv);
 
+              // The reply has now been saved, so make it deletable as a pair too.
+              setMessageId(botRow, event.message_id);
+
               // Update active conversation title in sidebar if updated
               fetchConversations();
             } else if (event.type === 'error') {
-              botContentDiv.innerHTML += `<div style="color: #f87171; margin-top: 8px;">Error: ${event.error}</div>`;
+              clearPermissionPrompts();
+              agentErrorText = event.error || 'The agent stopped with an unknown error.';
+              botContentDiv.innerHTML = `
+                <div class="agent-error-block">
+                  <div class="agent-error-title">Agent stopped</div>
+                  <div>${escapeHtml(agentErrorText)}</div>
+                </div>`;
+              const stepPill = botBubble.querySelector('.agent-step-indicator');
+              if (stepPill) {
+                stepPill.innerHTML = '<span>⚠</span> <span>Agent stopped with an error</span>';
+              }
             }
           } catch (pe) {
             console.warn('SSE parse error:', pe);
@@ -1897,6 +2044,8 @@
       }
     } finally {
       isGenerating = false;
+      currentAgentTaskId = null;
+      clearPermissionPrompts();
       btnSendMessage.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="12" y1="19" x2="12" y2="5"></line>
