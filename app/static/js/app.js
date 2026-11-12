@@ -2266,16 +2266,37 @@
     try {
       const res = await fetch('/api/settings');
       const cfg = await res.json();
+      if (cfg.selected_provider && cfg.selected_model) {
+        savedModelSelection = `${cfg.selected_provider}:${cfg.selected_model}`;
+      }
       settingOllamaUrl.value = cfg.ollama_url || 'http://localhost:11434';
       settingOpenAiKey.placeholder = cfg.masked_api_keys?.openai || 'sk-...';
       settingAnthropicKey.placeholder = cfg.masked_api_keys?.anthropic || 'sk-ant-...';
       settingGeminiKey.placeholder = cfg.masked_api_keys?.gemini || 'AIzaSy...';
       settingGroqKey.placeholder = cfg.masked_api_keys?.groq || 'gsk_...';
       settingOpenRouterKey.placeholder = cfg.masked_api_keys?.openrouter || 'sk-or-...';
+      if (settingVisionModel) settingVisionModel.value = cfg.vision_model || '';
+      if (settingKeepAlive) settingKeepAlive.value = cfg.keep_alive || '30m';
+      if (settingAgentWorkspace) settingAgentWorkspace.value = cfg.agent_workspace || '';
+      if (settingAgentPermissionMode) {
+        settingAgentPermissionMode.value = cfg.agent_permission_mode === 'always_ask'
+          ? 'always_ask'
+          : 'allow_all';
+      }
       settingTokenBudget.value = cfg.token_budget_limit || 100000;
+      const wsSlider = document.getElementById('settingWebSearchCount');
+      const wsDisplay = document.getElementById('webSearchCountDisplay');
+      if (wsSlider && cfg.web_search_results_count) {
+        wsSlider.value = cfg.web_search_results_count;
+        if (wsDisplay) wsDisplay.textContent = cfg.web_search_results_count;
+      }
       if (cfg.remember_context !== undefined && btnToggleAppendChat) {
         appendChatEnabled = Boolean(cfg.remember_context);
         btnToggleAppendChat.classList.toggle('active', appendChatEnabled);
+      }
+      if (cfg.agent_mode !== undefined && btnToggleAgentMode) {
+        agentModeEnabled = Boolean(cfg.agent_mode);
+        btnToggleAgentMode.classList.toggle('active', agentModeEnabled);
       }
     } catch (e) {
       console.error('Failed to load settings:', e);
@@ -2283,10 +2304,17 @@
   }
 
   async function saveSettings() {
+    const wsSlider = document.getElementById('settingWebSearchCount');
     const payload = {
       settings: {
         ollama_url: settingOllamaUrl.value.trim() || 'http://localhost:11434',
         token_budget_limit: parseInt(settingTokenBudget.value, 10) || 100000,
+        web_search_results_count: wsSlider ? (parseInt(wsSlider.value, 10) || 10) : 10,
+        vision_model: settingVisionModel ? settingVisionModel.value.trim() : '',
+        keep_alive: settingKeepAlive ? settingKeepAlive.value : '30m',
+        agent_workspace: settingAgentWorkspace ? settingAgentWorkspace.value.trim() : '',
+        agent_permission_mode: settingAgentPermissionMode ? settingAgentPermissionMode.value : 'allow_all',
+        agent_mode: agentModeEnabled,
         api_keys: {}
       }
     };
