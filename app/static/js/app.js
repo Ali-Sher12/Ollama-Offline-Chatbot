@@ -554,11 +554,36 @@
           data[prov].models.forEach((m) => {
             const opt = document.createElement('option');
             opt.value = `${prov}:${m.id}`;
-            opt.textContent = `${data[prov].name}: ${m.name}`;
+            const starPrefix = m.is_recommended ? '⭐ ' : '';
+            opt.textContent = `${starPrefix}${data[prov].name}: ${m.raw_name || m.name}`;
+            if (m.is_recommended && m.recommendation_reason) {
+              opt.title = m.recommendation_reason;
+            }
             optGroupOnline.appendChild(opt);
           });
         }
       });
+
+      // Keep the user's current selection if it survived the refresh. On the
+      // first load, honour the model saved in settings instead of the static
+      // HTML default so the selected model persists across app restarts.
+      const availableValues = Array.from(modelSelector.options).map((o) => o.value);
+      const preferredSelection = (!hasInitializedModelSelection && savedModelSelection)
+        ? savedModelSelection
+        : previousSelection;
+      let targetSelection = preferredSelection;
+      if (!targetSelection || !availableValues.includes(targetSelection)) {
+        targetSelection = previousSelection;
+      }
+      if (targetSelection && availableValues.includes(targetSelection)) {
+        modelSelector.value = targetSelection;
+      }
+      hasInitializedModelSelection = true;
+
+      updateModelSelectorLabel();
+      if (modelSearchPopover && !modelSearchPopover.hidden) {
+        renderModelSearchResults(modelSearchInput.value);
+      }
     } catch (e) {
       console.error('Failed to load models:', e);
       statusDot.classList.add('offline');
