@@ -12,3 +12,5 @@ python-pptx>=1.0.0
 pywebview>=5.0.0
 python-multipart>=0.0.9
 colorama>=0.4.6
+opencv-python-headless>=4.10.0
+numpy>=1.26.0
