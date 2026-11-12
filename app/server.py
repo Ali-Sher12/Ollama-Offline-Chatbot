@@ -269,6 +269,18 @@ async def delete_conversation(conv_id: str):
     return {"status": "ok"}
 
 
+@app.delete("/api/conversations/{conv_id}/messages/{msg_id}")
+async def delete_message_pair(conv_id: str, msg_id: str):
+    """
+    Delete a user message and its paired assistant reply.
+    Pass the ID of either the user message or the assistant message.
+    """
+    result = db.delete_message_pair(conv_id, msg_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Message not found"))
+    return result
+
+
 @app.post("/api/conversations/{conv_id}/export")
 async def export_conversation(conv_id: str, format: str = "docx"):
     """Export conversation to DOCX or Markdown file."""
