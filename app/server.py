@@ -580,6 +580,8 @@ async def get_settings():
 async def update_settings(req: SettingsUpdateRequest):
     """Save updated application settings."""
     updated = config_manager.update(req.settings)
+    if str((req.settings or {}).get("agent_permission_mode", "")).lower() == "allow_all":
+        permission_broker.allow_all_pending()
     return {"status": "ok", "settings": updated}
 
 
