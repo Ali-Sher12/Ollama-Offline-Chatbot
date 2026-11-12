@@ -1784,13 +1784,17 @@
       message: text,
       attachments: [...attachedFiles],
       use_web_search: webSearchEnabled,
+      web_search_results_count: parseInt((document.getElementById('settingWebSearchCount') || {value: '10'}).value, 10) || 10,
       append_chat: appendChatEnabled,
       provider: provider,
-      model: model
+      model: model,
+      agent_mode: agentModeEnabled,
+      project_id: currentProjectId
     };
 
     // Render User message
-    appendMessageBubble('user', text, { attachments: payload.attachments });
+    const userBubble = appendMessageBubble('user', text, { attachments: payload.attachments });
+    const userRow = userBubble.closest('.message-row');
 
     // Reset input
     messageInput.value = '';
@@ -1800,15 +1804,18 @@
 
     // Prepare Assistant placeholder
     const botBubble = appendMessageBubble('assistant', '...');
+    const botRow = botBubble.closest('.message-row');
     const botContentDiv = botBubble.querySelector('.bubble-content');
 
     // Update generating state
     isGenerating = true;
+    currentAgentTaskId = null;
     btnSendMessage.innerHTML = 'Stop';
     btnSendMessage.title = 'Stop generating';
 
     activeAbortController = new AbortController();
     let accumulatedText = '';
+    let agentErrorText = '';
 
     try {
       const response = await fetch('/api/chat', {
@@ -1819,7 +1826,12 @@
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        let errDetail = `Server returned ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.detail) errDetail = errData.detail;
+        } catch (_) {}
+        throw new Error(errDetail);
       }
 
       const reader = response.body.getReader();
