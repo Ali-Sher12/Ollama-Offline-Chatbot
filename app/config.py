@@ -27,7 +27,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "gemini": "https://generativelanguage.googleapis.com/v1beta",
         "groq": "https://api.groq.com/openai/v1",
         "openrouter": "https://openrouter.ai/api/v1"
-    }
+    },
+    "agent_mode": False,
+    "agent_workspace": str(Path(__file__).resolve().parent.parent),
+    "agent_timeout_seconds": 60,
+    "agent_permission_mode": "allow_all",
+    "agent_permission_timeout_seconds": 300,
+    "vision_provider": "auto",
+    "vision_model": ""
 }
 
 class ConfigManager:
