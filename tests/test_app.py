@@ -128,6 +128,38 @@ class TestOllamaChatbot(unittest.TestCase):
         self.assertIn("summary", data)
         self.assertIn("budget_status", data)
 
+    def test_delete_message_pair(self):
+        conv = db.create_conversation(title="Delete Pair Test", provider="ollama", model="llama3.2:1b")
+        user_one = db.add_message(conv["id"], "user", "First prompt")
+        assistant_one = db.add_message(conv["id"], "assistant", "First reply")
+        user_two = db.add_message(conv["id"], "user", "Second prompt")
+        assistant_two = db.add_message(conv["id"], "assistant", "Second reply")
+
+        # Deleting from the assistant side removes the whole second pair.
+        result = db.delete_message_pair(conv["id"], assistant_two["id"])
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            set(result["deleted_ids"]),
+            {user_two["id"], assistant_two["id"]}
+        )
+        remaining = db.get_conversation(conv["id"])["messages"]
+        self.assertEqual([m["id"] for m in remaining], [user_one["id"], assistant_one["id"]])
+
+        # Deleting from the user side removes the whole first pair.
+        result = db.delete_message_pair(conv["id"], user_one["id"])
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            set(result["deleted_ids"]),
+            {user_one["id"], assistant_one["id"]}
+        )
+        self.assertEqual(db.get_conversation(conv["id"])["messages"], [])
+
+        # Unknown message ids are rejected.
+        result = db.delete_message_pair(conv["id"], "missing-message-id")
+        self.assertFalse(result["success"])
+
+        db.delete_conversation(conv["id"])
+
     def test_append_chat_option(self):
         conv = db.create_conversation(title="Append Test", provider="ollama", model="llama3.2:1b")
         # Turn 1
