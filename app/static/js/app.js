@@ -12,15 +12,44 @@
   let attachedFiles = [];
   let webSearchEnabled = false;
   let appendChatEnabled = true;
+  let agentModeEnabled = false;
+  let savedModelSelection = null;
+  let hasInitializedModelSelection = false;
+  let currentAgentTaskId = null;
   let isGenerating = false;
   let activeAbortController = null;
   let sessionTokens = 0;
+  let isDownloadingModel = false;
+  let currentDownloadingModel = null;
+  let modelSearchItems = [];
+  let modelSearchActiveIndex = -1;
+  let installedModelsCache = [];
+  let recommendedModelsCache = [];
+  let modelLibraryQuery = '';
+  let permissionQueue = [];
+  let activePermissionRequest = null;
+  let permissionResponding = false;
+
+  // Antigravity Project State
+  let currentProjectId = null;
+  let currentProjectPath = null;
+  let currentProjectName = null;
+  let projectsList = [];
+  let modifiedFilesMap = new Map(); // path -> { action: 'created'|'modified'|'deleted', tool: string, timestamp: number }
 
   // DOM Elements
   const btnNewChat = document.getElementById('btnNewChat');
   const conversationsList = document.getElementById('conversationsList');
   const searchHistoryInput = document.getElementById('searchHistoryInput');
   const modelSelector = document.getElementById('modelSelector');
+  const modelSelectorWrapper = document.getElementById('modelSelectorWrapper');
+  const modelSelectorButton = document.getElementById('modelSelectorButton');
+  const modelSelectorLabel = document.getElementById('modelSelectorLabel');
+  const modelSearchPopover = document.getElementById('modelSearchPopover');
+  const modelSearchInput = document.getElementById('modelSearchInput');
+  const modelSearchClear = document.getElementById('modelSearchClear');
+  const modelSearchSummary = document.getElementById('modelSearchSummary');
+  const modelSearchResults = document.getElementById('modelSearchResults');
   const optGroupOllama = document.getElementById('optGroupOllama');
   const optGroupOnline = document.getElementById('optGroupOnline');
   const statusDot = document.getElementById('statusDot');
@@ -34,7 +63,43 @@
   const attachmentsTray = document.getElementById('attachmentsTray');
   const btnToggleWebSearch = document.getElementById('btnToggleWebSearch');
   const btnToggleAppendChat = document.getElementById('btnToggleAppendChat');
+  const btnToggleAgentMode = document.getElementById('btnToggleAgentMode');
   const btnExportChat = document.getElementById('btnExportChat');
+
+  // Project DOM Elements
+  const btnProjectSelector = document.getElementById('btnProjectSelector');
+  const activeProjectLabel = document.getElementById('activeProjectLabel');
+  const projectDropdownMenu = document.getElementById('projectDropdownMenu');
+  const btnDropdownGlobal = document.getElementById('btnDropdownGlobal');
+  const btnDropdownOpenProject = document.getElementById('btnDropdownOpenProject');
+  const btnDropdownProjectDetails = document.getElementById('btnDropdownProjectDetails');
+  const recentProjectsContainer = document.getElementById('recentProjectsContainer');
+
+  // Project Modal DOM Elements
+  const projectModal = document.getElementById('projectModal');
+  const projectModalTitle = document.getElementById('projectModalTitle');
+  const projectPathInput = document.getElementById('projectPathInput');
+  const projectNameInput = document.getElementById('projectNameInput');
+  const projectInstructionsInput = document.getElementById('projectInstructionsInput');
+  const projectOverviewSection = document.getElementById('projectOverviewSection');
+  const projStatFiles = document.getElementById('projStatFiles');
+  const projStatDirs = document.getElementById('projStatDirs');
+  const projFileTree = document.getElementById('projFileTree');
+  const btnCloseProjectModal = document.getElementById('btnCloseProjectModal');
+  const btnCancelProjectModal = document.getElementById('btnCancelProjectModal');
+  const btnConfirmOpenProject = document.getElementById('btnConfirmOpenProject');
+
+  // Changes Review DOM Elements
+  const btnReviewChanges = document.getElementById('btnReviewChanges');
+  const modifiedFilesCount = document.getElementById('modifiedFilesCount');
+  const changesReviewModal = document.getElementById('changesReviewModal');
+  const btnCloseChangesModal = document.getElementById('btnCloseChangesModal');
+  const btnDismissChanges = document.getElementById('btnDismissChanges');
+  const btnClearChanges = document.getElementById('btnClearChanges');
+  const modifiedFilesList = document.getElementById('modifiedFilesList');
+  const diffViewerWrapper = document.getElementById('diffViewerWrapper');
+  const diffViewerFileName = document.getElementById('diffViewerFileName');
+  const diffViewerCode = document.getElementById('diffViewerCode');
 
   // Modals
   const settingsModal = document.getElementById('settingsModal');
@@ -55,7 +120,47 @@
   const settingGeminiKey = document.getElementById('settingGeminiKey');
   const settingGroqKey = document.getElementById('settingGroqKey');
   const settingOpenRouterKey = document.getElementById('settingOpenRouterKey');
+  const settingVisionModel = document.getElementById('settingVisionModel');
+  const settingKeepAlive = document.getElementById('settingKeepAlive');
+  const settingAgentWorkspace = document.getElementById('settingAgentWorkspace');
   const settingTokenBudget = document.getElementById('settingTokenBudget');
+  const settingAgentPermissionMode = document.getElementById('settingAgentPermissionMode');
+
+  // Agent permission approval modal
+  const permissionModal = document.getElementById('permissionModal');
+  const permissionSubtitle = document.getElementById('permissionSubtitle');
+  const permissionToolName = document.getElementById('permissionToolName');
+  const permissionTitle = document.getElementById('permissionTitle');
+  const permissionDetail = document.getElementById('permissionDetail');
+  const permissionRisk = document.getElementById('permissionRisk');
+  const permissionPreviewWrapper = document.getElementById('permissionPreviewWrapper');
+  const permissionPreviewLabel = document.getElementById('permissionPreviewLabel');
+  const permissionPreview = document.getElementById('permissionPreview');
+  const btnDenyPermission = document.getElementById('btnDenyPermission');
+  const btnAlwaysAllowPermission = document.getElementById('btnAlwaysAllowPermission');
+  const btnAllowPermission = document.getElementById('btnAllowPermission');
+
+  // Local Model Library
+  const modelsModal = document.getElementById('modelsModal');
+  const btnOpenModels = document.getElementById('btnOpenModels');
+  const btnCloseModels = document.getElementById('btnCloseModels');
+  const btnDismissModels = document.getElementById('btnDismissModels');
+  const btnRefreshModels = document.getElementById('btnRefreshModels');
+  const customModelInput = document.getElementById('customModelInput');
+  const btnPullCustomModel = document.getElementById('btnPullCustomModel');
+  const installedModelsList = document.getElementById('installedModelsList');
+  const recommendedModelsList = document.getElementById('recommendedModelsList');
+  const modelLibrarySearchInput = document.getElementById('modelLibrarySearchInput');
+  const modelLibrarySearchClear = document.getElementById('modelLibrarySearchClear');
+  const modelLibrarySearchStatus = document.getElementById('modelLibrarySearchStatus');
+  const installedModelsCount = document.getElementById('installedModelsCount');
+  const recommendedModelsCount = document.getElementById('recommendedModelsCount');
+  const modelDownloadStatus = document.getElementById('modelDownloadStatus');
+  const modelDownloadLabel = document.getElementById('modelDownloadLabel');
+  const modelDownloadPercent = document.getElementById('modelDownloadPercent');
+  const modelDownloadProgressFill = document.getElementById('modelDownloadProgressFill');
+  const modelDownloadDetail = document.getElementById('modelDownloadDetail');
+  const btnCancelDownload = document.getElementById('btnCancelDownload');
 
   // Analytics displays
   const statTotalTokens = document.getElementById('statTotalTokens');
@@ -114,6 +219,8 @@
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Initialization
   // --------------------------------------------------------------------------
   // Initialization
   // --------------------------------------------------------------------------
