@@ -279,6 +279,68 @@ class Database:
             conn.commit()
             return cursor.rowcount > 0
 
+    def delete_message_pair(self, conv_id: str, message_id: str) -> Dict[str, Any]:
+        """
+        Delete a user message and its paired assistant reply.
+
+        The pair can be addressed from either side: deleting a user message also
+        deletes the assistant reply that immediately follows it, and deleting an
+        assistant message also deletes the user message that immediately precedes
+        it. Returns the ids of the messages that were deleted.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Fetch all messages for this conversation in order. rowid is used as
+            # a tie-breaker so messages saved in the same microsecond keep their
+            # insertion order.
+            cursor.execute(
+                """
+                SELECT id, role FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at ASC, rowid ASC
+                """,
+                (conv_id,)
+            )
+            rows = cursor.fetchall()
+
+            target_index = next(
+                (i for i, row in enumerate(rows) if row["id"] == message_id),
+                None
+            )
+            if target_index is None:
+                return {"success": False, "error": "Message not found"}
+
+            target = rows[target_index]
+            ids_to_delete = [target["id"]]
+
+            if target["role"] == "user":
+                # Pair the user turn with the assistant reply directly after it.
+                if target_index + 1 < len(rows):
+                    next_row = rows[target_index + 1]
+                    if next_row["role"] == "assistant":
+                        ids_to_delete.append(next_row["id"])
+            elif target["role"] == "assistant":
+                # Pair the assistant turn with the user message directly before
+                # it. If there is no such user message (e.g. an orphaned reply),
+                # just delete the assistant message.
+                if target_index > 0:
+                    prev_row = rows[target_index - 1]
+                    if prev_row["role"] == "user":
+                        ids_to_delete.insert(0, prev_row["id"])
+
+            placeholders = ",".join("?" * len(ids_to_delete))
+            cursor.execute(
+                f"DELETE FROM messages WHERE id IN ({placeholders})",
+                ids_to_delete
+            )
+            # Update conversation timestamp
+            cursor.execute(
+                "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), conv_id)
+            )
+            conn.commit()
+            return {"success": True, "deleted_ids": ids_to_delete}
+
     def add_message(
         self,
         conversation_id: str,
