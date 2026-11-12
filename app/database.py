@@ -23,15 +23,35 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                instructions TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
+                project_id TEXT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
             )
             """)
+
+            # Safe migration: add project_id column if table already exists without it
+            cursor.execute("PRAGMA table_info(conversations)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "project_id" not in cols:
+                cursor.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT DEFAULT NULL")
 
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
@@ -64,38 +84,160 @@ class Database:
             """)
             conn.commit()
 
-    def create_conversation(self, title: str = "New Chat", provider: str = "ollama", model: str = "llama3.2:1b") -> Dict[str, Any]:
+    # -------------------------------------------------------------------------
+    # Project Management
+    # -------------------------------------------------------------------------
+    def create_project(self, name: str, path: str, instructions: str = "") -> Dict[str, Any]:
+        proj_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO projects (id, name, path, instructions, created_at, updated_at, last_opened_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (proj_id, name, path, instructions, now, now, now)
+            )
+            conn.commit()
+        return {
+            "id": proj_id,
+            "name": name,
+            "path": path,
+            "instructions": instructions,
+            "created_at": now,
+            "updated_at": now,
+            "last_opened_at": now
+        }
+
+    def list_projects(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.*,
+                       COUNT(DISTINCT c.id) as conversation_count
+                FROM projects p
+                LEFT JOIN conversations c ON p.id = c.project_id
+                GROUP BY p.id
+                ORDER BY p.last_opened_at DESC
+            """)
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_project_by_path(self, path: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM projects WHERE path = ?", (path,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_project(
+        self,
+        project_id: str,
+        name: Optional[str] = None,
+        path: Optional[str] = None,
+        instructions: Optional[str] = None,
+        touch_opened: bool = False
+    ) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        updates = ["updated_at = ?"]
+        params = [now]
+
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if path is not None:
+            updates.append("path = ?")
+            params.append(path)
+        if instructions is not None:
+            updates.append("instructions = ?")
+            params.append(instructions)
+        if touch_opened:
+            updates.append("last_opened_at = ?")
+            params.append(now)
+
+        params.append(project_id)
+        query = f"UPDATE projects SET {', '.join(updates)} WHERE id = ?"
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_project(self, project_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Set project_id to NULL on any associated conversations
+            cursor.execute("UPDATE conversations SET project_id = NULL WHERE project_id = ?", (project_id,))
+            cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # -------------------------------------------------------------------------
+    # Conversations
+    # -------------------------------------------------------------------------
+    def create_conversation(
+        self,
+        title: str = "New Chat",
+        provider: str = "ollama",
+        model: str = "llama3.2:1b",
+        project_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         conv_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO conversations (id, title, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (conv_id, title, provider, model, now, now)
+                "INSERT INTO conversations (id, title, provider, model, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (conv_id, title, provider, model, project_id, now, now)
             )
+            # If project_id is provided, touch last_opened_at on project
+            if project_id:
+                cursor.execute("UPDATE projects SET last_opened_at = ?, updated_at = ? WHERE id = ?", (now, now, project_id))
             conn.commit()
         return {
             "id": conv_id,
             "title": title,
             "provider": provider,
             "model": model,
+            "project_id": project_id,
             "created_at": now,
             "updated_at": now,
             "messages": []
         }
 
-    def list_conversations(self) -> List[Dict[str, Any]]:
+    def list_conversations(self, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT c.id, c.title, c.provider, c.model, c.created_at, c.updated_at,
+            base_query = """
+                SELECT c.id, c.title, c.provider, c.model, c.project_id, c.created_at, c.updated_at,
                        COUNT(m.id) as message_count,
                        COALESCE(SUM(m.prompt_tokens + m.completion_tokens), 0) as total_tokens
                 FROM conversations c
                 LEFT JOIN messages m ON c.id = m.conversation_id
+            """
+            params = []
+            if project_id == "all":
+                where_clause = ""
+            elif project_id is not None:
+                where_clause = "WHERE c.project_id = ?"
+                params.append(project_id)
+            else:
+                where_clause = "WHERE c.project_id IS NULL"
+
+            full_query = f"""
+                {base_query}
+                {where_clause}
                 GROUP BY c.id
                 ORDER BY c.updated_at DESC
-            """)
+            """
+            cursor.execute(full_query, tuple(params))
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
 
