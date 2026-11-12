@@ -87,14 +87,21 @@
       <!-- Chat Header -->
       <header class="chat-header">
         <div class="header-left">
-          <!-- Model Selector -->
-          <div class="model-selector-wrapper">
+          <!-- Model Selector (searchable) -->
+          <div class="model-selector-wrapper" id="modelSelectorWrapper">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #60a5fa;">
               <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
               <polyline points="2 17 12 22 22 17"></polyline>
               <polyline points="2 12 12 17 22 12"></polyline>
             </svg>
-            <select id="modelSelector" class="model-select">
+            <button type="button" class="model-select-trigger" id="modelSelectorButton" aria-haspopup="listbox" aria-expanded="false" title="Search and select a model">
+              <span id="modelSelectorLabel">Loading models...</span>
+              <svg class="model-select-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <!-- Native select kept for existing app logic; the searchable popover drives it -->
+            <select id="modelSelector" class="model-select-native" aria-hidden="true" tabindex="-1">
               <optgroup label="Local Ollama" id="optGroupOllama">
                 <option value="ollama:llama3.2:1b">llama3.2:1b</option>
               </optgroup>
@@ -107,6 +114,19 @@
                 <option value="openrouter:meta-llama/llama-3.3-70b-instruct">OpenRouter: Llama 3.3 70B</option>
               </optgroup>
             </select>
+
+            <div class="model-search-popover" id="modelSearchPopover" hidden>
+              <div class="model-search-box">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="modelSearchInput" class="model-search-input" placeholder="Search models by name, provider, or tag..." autocomplete="off" spellcheck="false">
+                <button type="button" class="model-search-clear" id="modelSearchClear" title="Clear search" style="display: none;">&times;</button>
+              </div>
+              <div class="model-search-summary" id="modelSearchSummary">0 models</div>
+              <div class="model-search-results" id="modelSearchResults" role="listbox"></div>
+            </div>
           </div>
         </div>
 
@@ -119,12 +139,36 @@
             <span id="sessionTokensCount">0 tokens</span>
           </div>
 
-          <!-- Export Button -->
-          <button class="btn-header-action" id="btnExportChat" title="Export Chat (DOCX / Markdown)">
+          <!-- Export Chat Button -->
+          <button class="btn-header-action" id="btnExportChat" title="Export Chat as DOCX or Markdown">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <path d="M12 11v6"></path>
+              <polyline points="9 14.5 12 17.5 15 14.5"></polyline>
+            </svg>
+          </button>
+
+          <!-- Review Changes Button -->
+          <button class="btn-header-action" id="btnReviewChanges" title="Review Modified Files & Diffs" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span class="badge-count" id="modifiedFilesCount">0</span>
+          </button>
+
+          <!-- Model Library Button -->
+          <button class="btn-header-action btn-model-library" id="btnOpenModels" title="Model Library: Download & Manage Local Models">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 7.5a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 7.5v9a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l3-1.71"></path>
+              <path d="M3.3 6.5 12 11.5l8.7-5"></path>
+              <path d="M12 21.5v-10"></path>
+              <path d="M18.5 16v5"></path>
+              <polyline points="16 18.5 18.5 21 21 18.5"></polyline>
             </svg>
           </button>
 
