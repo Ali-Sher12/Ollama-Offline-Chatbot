@@ -23,7 +23,7 @@ class RAGService:
         cleaned = cleaned.rstrip('?.!').strip()
         return cleaned if len(cleaned) >= 2 else query
 
-    def search_web(self, query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    def search_web(self, query: str, max_results: int = 10) -> List[Dict[str, str]]:
         """Perform robust web search via ddgs / DuckDuckGo."""
         results = []
         cleaned_query = self.clean_search_query(query)
