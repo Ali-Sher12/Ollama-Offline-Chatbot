@@ -1,34 +1,119 @@
-version: '3.8'
+version: '3.9'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Ollama Desktop Chatbot — Docker Compose
+#
+# Profiles:
+#   default              → chatbot only (connects to Ollama on host)
+#   --profile with-ollama → chatbot + bundled Ollama service
+#   --profile gpu        → chatbot + bundled Ollama with GPU passthrough
+#
+# Quick start:
+#   docker compose up                          # host Ollama
+#   docker compose --profile with-ollama up   # bundled Ollama (CPU)
+#   docker compose --profile gpu up           # bundled Ollama (NVIDIA GPU)
+# ═══════════════════════════════════════════════════════════════════════════
 
 services:
+
+  # ── Main chatbot application ─────────────────────────────────────────────
   chatbot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ollama_desktop_chatbot
+    image: ollama-chatbot:latest
+    container_name: ollama_chatbot
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:8080"
     environment:
-      - PORT=8080
-      - OLLAMA_URL=http://host.docker.internal:11434
+      PORT: "${PORT:-8080}"
+      # Point at host Ollama by default; override when using bundled Ollama profile
+      OLLAMA_URL: "${OLLAMA_URL:-http://host.docker.internal:11434}"
+      AGENT_WORKSPACE: /workspace
+      AGENT_PERMISSION_MODE: "${AGENT_PERMISSION_MODE:-allow_all}"
+      AGENT_TIMEOUT_SECONDS: "${AGENT_TIMEOUT_SECONDS:-300}"
+      # Optional cloud API keys (leave blank if not using)
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
     volumes:
-      - ./data:/app/data
-      - ./OutWrite Documents:/app/OutWrite Documents
+      # Persistent chat history & settings
+      - chatbot_data:/app/data
+      # Agent workspace — mount your project folder here for the agent to work on it
+      - "${AGENT_WORKSPACE_HOST:-./workspace}:/workspace"
+      # Uploaded files
+      - chatbot_uploads:/app/static/uploads
     extra_hosts:
+      # Allow the container to reach host.docker.internal on Linux
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false  # only needed if the with-ollama profile is active
 
-  # Optional bundled Ollama service if you don't run Ollama natively on host
-  # To run with bundled ollama: docker compose --profile with-ollama up
+  # ── Bundled Ollama (CPU) ─────────────────────────────────────────────────
+  # Activate with: docker compose --profile with-ollama up
   ollama:
     image: ollama/ollama:latest
-    container_name: ollama_bundled
-    profiles: ["with-ollama"]
+    container_name: ollama_server
+    profiles: ["with-ollama", "gpu"]
     ports:
       - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-30m}"
+      OLLAMA_NUM_PARALLEL: "${OLLAMA_NUM_PARALLEL:-2}"
+      OLLAMA_MAX_LOADED_MODELS: "${OLLAMA_MAX_LOADED_MODELS:-2}"
+
+  # ── Bundled Ollama (NVIDIA GPU) ──────────────────────────────────────────
+  # Activate with: docker compose --profile gpu up
+  # Requires nvidia-container-toolkit on the host.
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: ollama_server_gpu
+    profiles: ["gpu"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-30m}"
 
 volumes:
+  chatbot_data:
+    driver: local
+  chatbot_uploads:
+    driver: local
   ollama_models:
+    driver: local
