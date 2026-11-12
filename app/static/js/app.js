@@ -228,7 +228,7 @@
     setupEventListeners();
     await loadSettings();
     await loadModels();
-    await fetchConversations();
+    await loadActiveProjectAndProjects();
     await updateAnalyticsUI();
   }
 
@@ -283,6 +283,14 @@
       });
     }
 
+    // Agent Mode Toggle
+    if (btnToggleAgentMode) {
+      btnToggleAgentMode.addEventListener('click', () => {
+        agentModeEnabled = !agentModeEnabled;
+        btnToggleAgentMode.classList.toggle('active', agentModeEnabled);
+      });
+    }
+
     // Export Chat
     btnExportChat.addEventListener('click', handleExportChat);
 
@@ -292,6 +300,42 @@
     btnCancelSettings.addEventListener('click', () => settingsModal.classList.remove('open'));
     btnSaveSettings.addEventListener('click', saveSettings);
 
+    // Agent permission approval controls
+    if (btnDenyPermission) btnDenyPermission.addEventListener('click', () => respondToPermission('deny'));
+    if (btnAlwaysAllowPermission) btnAlwaysAllowPermission.addEventListener('click', () => respondToPermission('always_allow'));
+    if (btnAllowPermission) btnAllowPermission.addEventListener('click', () => respondToPermission('allow'));
+
+    // Local Model Library Modal
+    if (btnOpenModels) {
+      btnOpenModels.addEventListener('click', openModelLibrary);
+    }
+    if (btnCloseModels) btnCloseModels.addEventListener('click', () => modelsModal.classList.remove('open'));
+    if (btnDismissModels) btnDismissModels.addEventListener('click', () => modelsModal.classList.remove('open'));
+    if (btnRefreshModels) btnRefreshModels.addEventListener('click', refreshModelLibrary);
+    if (btnPullCustomModel) {
+      btnPullCustomModel.addEventListener('click', () => {
+        const name = customModelInput.value.trim();
+        if (!name) {
+          alert('Enter a model name first, for example llama3.2:3b.');
+          return;
+        }
+        pullModel(name);
+      });
+    }
+    if (customModelInput) {
+      customModelInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const name = customModelInput.value.trim();
+          if (name) pullModel(name);
+        }
+      });
+    }
+    if (btnCancelDownload) {
+      btnCancelDownload.disabled = true; // disabled until a download starts
+      btnCancelDownload.addEventListener('click', cancelModelDownload);
+    }
+
     // Analytics Modal
     btnOpenAnalytics.addEventListener('click', async () => {
       await updateAnalyticsUI();
@@ -300,8 +344,142 @@
     btnCloseAnalytics.addEventListener('click', () => analyticsModal.classList.remove('open'));
     btnDismissAnalytics.addEventListener('click', () => analyticsModal.classList.remove('open'));
 
+    // Project Selector Menu Toggle
+    if (btnProjectSelector) {
+      btnProjectSelector.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isShown = projectDropdownMenu.style.display === 'flex';
+        projectDropdownMenu.style.display = isShown ? 'none' : 'flex';
+      });
+    }
+
+    // Document click to close project dropdown
+    document.addEventListener('click', (e) => {
+      if (projectDropdownMenu && !projectDropdownMenu.contains(e.target) && !btnProjectSelector.contains(e.target)) {
+        projectDropdownMenu.style.display = 'none';
+      }
+    });
+
+    // Dropdown Action: Global Workspace
+    if (btnDropdownGlobal) {
+      btnDropdownGlobal.addEventListener('click', async () => {
+        projectDropdownMenu.style.display = 'none';
+        await closeActiveProject();
+      });
+    }
+
+    // Dropdown Action: Open / Create Project
+    if (btnDropdownOpenProject) {
+      btnDropdownOpenProject.addEventListener('click', () => {
+        projectDropdownMenu.style.display = 'none';
+        projectModalTitle.textContent = 'Open or Create Project';
+        projectPathInput.value = '';
+        projectNameInput.value = '';
+        projectInstructionsInput.value = '';
+        projectOverviewSection.style.display = 'none';
+        btnConfirmOpenProject.textContent = 'Open Project';
+        projectModal.classList.add('open');
+        projectPathInput.focus();
+      });
+    }
+
+    // Dropdown Action: Project Details / Settings
+    if (btnDropdownProjectDetails) {
+      btnDropdownProjectDetails.addEventListener('click', async () => {
+        projectDropdownMenu.style.display = 'none';
+        if (!currentProjectId) return;
+        try {
+          const res = await fetch(`/api/projects/${currentProjectId}`);
+          if (res.ok) {
+            const data = await res.json();
+            projectModalTitle.textContent = `Project: ${data.name}`;
+            projectPathInput.value = data.path;
+            projectNameInput.value = data.name;
+            projectInstructionsInput.value = data.instructions_content || data.instructions || '';
+
+            const ov = data.overview || {};
+            projStatFiles.textContent = ov.total_files || 0;
+            projStatDirs.textContent = ov.total_dirs || 0;
+            if (ov.file_tree && ov.file_tree.length > 0) {
+              projFileTree.innerHTML = ov.file_tree.slice(0, 40).map(f => escapeHtml(f)).join('<br>');
+            } else {
+              projFileTree.textContent = 'No files found or empty directory';
+            }
+            projectOverviewSection.style.display = 'block';
+            btnConfirmOpenProject.textContent = 'Save Changes';
+            projectModal.classList.add('open');
+          }
+        } catch (e) {
+          console.error('Failed to load project details:', e);
+        }
+      });
+    }
+
+    // Project Modal Close & Confirm
+    if (btnCloseProjectModal) btnCloseProjectModal.addEventListener('click', () => projectModal.classList.remove('open'));
+    if (btnCancelProjectModal) btnCancelProjectModal.addEventListener('click', () => projectModal.classList.remove('open'));
+    if (btnConfirmOpenProject) btnConfirmOpenProject.addEventListener('click', handleSaveOrOpenProject);
+
+    // Changes Review Modal
+    if (btnReviewChanges) {
+      btnReviewChanges.addEventListener('click', () => {
+        renderModifiedFilesList();
+        changesReviewModal.classList.add('open');
+      });
+    }
+    if (btnCloseChangesModal) btnCloseChangesModal.addEventListener('click', () => changesReviewModal.classList.remove('open'));
+    if (btnDismissChanges) btnDismissChanges.addEventListener('click', () => changesReviewModal.classList.remove('open'));
+    if (btnClearChanges) {
+      btnClearChanges.addEventListener('click', () => {
+        modifiedFilesMap.clear();
+        updateModifiedFilesBadge();
+        changesReviewModal.classList.remove('open');
+      });
+    }
+
+    // Searchable model selector
+    if (modelSelectorButton) {
+      modelSelectorButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleModelSearch(modelSearchPopover.hidden);
+      });
+      modelSelectorButton.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleModelSearch(true);
+        }
+      });
+    }
+
+    if (modelSearchInput) {
+      modelSearchInput.addEventListener('input', () => {
+        renderModelSearchResults(modelSearchInput.value);
+      });
+      modelSearchInput.addEventListener('keydown', handleModelSearchKeydown);
+    }
+
+    if (modelSearchClear) {
+      modelSearchClear.addEventListener('click', () => {
+        modelSearchInput.value = '';
+        renderModelSearchResults('');
+        modelSearchInput.focus();
+      });
+    }
+
+    if (modelSearchPopover) {
+      modelSearchPopover.addEventListener('click', (e) => e.stopPropagation());
+    }
+
+    document.addEventListener('click', (e) => {
+      if (modelSearchPopover && !modelSearchPopover.hidden &&
+          modelSelectorWrapper && !modelSelectorWrapper.contains(e.target)) {
+        toggleModelSearch(false);
+      }
+    });
+
     // Model Selector change
     modelSelector.addEventListener('change', async () => {
+      updateModelSelectorLabel();
       const val = modelSelector.value;
       const [provider, ...rest] = val.split(':');
       const model = rest.join(':');
@@ -311,13 +489,34 @@
         body: JSON.stringify({ settings: { selected_provider: provider, selected_model: model } })
       });
     });
+
+    // Model Library search
+    if (modelLibrarySearchInput) {
+      modelLibrarySearchInput.addEventListener('input', () => {
+        modelLibraryQuery = modelLibrarySearchInput.value;
+        updateModelLibrarySearchUI();
+        renderInstalledModels();
+        renderRecommendedModels();
+      });
+    }
+    if (modelLibrarySearchClear) {
+      modelLibrarySearchClear.addEventListener('click', () => {
+        modelLibrarySearchInput.value = '';
+        modelLibraryQuery = '';
+        updateModelLibrarySearchUI();
+        renderInstalledModels();
+        renderRecommendedModels();
+        modelLibrarySearchInput.focus();
+      });
+    }
   }
 
   // --------------------------------------------------------------------------
-  // Models & Providers
+  // Models & Providers (with Hardware Recommendation Stars)
   // --------------------------------------------------------------------------
   async function loadModels() {
     try {
+      const previousSelection = modelSelector.value;
       const res = await fetch('/api/models');
       const data = await res.json();
 
@@ -331,7 +530,11 @@
         ollamaModels.forEach((m) => {
           const opt = document.createElement('option');
           opt.value = `ollama:${m.id}`;
-          opt.textContent = m.name;
+          const starPrefix = m.is_recommended ? '⭐ ' : '';
+          opt.textContent = `${starPrefix}${m.raw_name || m.name || m.id}`;
+          if (m.is_recommended && m.recommendation_reason) {
+            opt.title = m.recommendation_reason;
+          }
           optGroupOllama.appendChild(opt);
         });
       } else {
