@@ -527,6 +527,106 @@
     </div>
   </div>
 
+  <!-- Modal: Open / Manage Project -->
+  <div class="modal-overlay" id="projectModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title" id="projectModalTitle">Open or Create Project</h3>
+        <button class="icon-btn-sm" id="btnCloseProjectModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Project Folder Path</label>
+          <input type="text" id="projectPathInput" class="form-input" placeholder="/path/to/project/folder">
+          <div class="form-hint" style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Enter the absolute path to an existing directory or a new folder to create.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Project Name (Optional)</label>
+          <input type="text" id="projectNameInput" class="form-input" placeholder="e.g. My AI App (Defaults to folder name)">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Project Instructions (`AGENTS.md`)</label>
+          <textarea id="projectInstructionsInput" class="form-textarea" rows="7" placeholder="Custom instructions, build & test commands for AI agent in this project..."></textarea>
+          <div class="form-hint" style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Instructions saved here will be stored in AGENTS.md in the project root and automatically loaded into the agent's context.</div>
+        </div>
+
+        <div id="projectOverviewSection" style="display: none; margin-top: 16px;">
+          <h4 style="font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 8px;">Project Overview & File Tree</h4>
+          <div class="stats-grid" style="margin-bottom: 12px;">
+            <div class="stat-card">
+              <span class="stat-label">Total Files</span>
+              <span class="stat-value" id="projStatFiles">0</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Total Directories</span>
+              <span class="stat-value" id="projStatDirs">0</span>
+            </div>
+          </div>
+          <div class="file-tree-preview" id="projFileTree" style="max-height: 140px; overflow-y: auto; background: var(--bg-card); padding: 8px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btnCancelProjectModal">Cancel</button>
+        <button class="btn-primary" id="btnConfirmOpenProject">Open Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Changes Review & Diffs -->
+  <div class="modal-overlay" id="changesReviewModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Review Agent Changes</h3>
+        <button class="icon-btn-sm" id="btnCloseChangesModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">The following files were created or modified during agent tasks in this session:</p>
+        <div class="modified-files-list" id="modifiedFilesList" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;"></div>
+        <div class="diff-viewer-wrapper" id="diffViewerWrapper" style="display: none;">
+          <div class="diff-viewer-header" id="diffViewerFileName" style="font-family: var(--font-mono); font-size: 12px; color: #60a5fa; margin-bottom: 6px; font-weight: 600;"></div>
+          <pre class="diff-viewer-pre" style="max-height: 260px; overflow-y: auto; background: #030712; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);"><code id="diffViewerCode" class="language-plaintext" style="font-size: 12px; font-family: var(--font-mono);"></code></pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btnClearChanges">Clear Tracking</button>
+        <button class="btn-primary" id="btnDismissChanges">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Delete Message Pair Confirmation Modal ───────────────────────── -->
+  <div class="modal-overlay" id="deleteMsgOverlay" role="dialog" aria-modal="true" aria-labelledby="deleteMsgTitle">
+    <div class="modal-dialog" style="max-width:420px;">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:38px;height:38px;border-radius:10px;background:rgba(224,48,48,0.12);border:1px solid rgba(224,48,48,0.32);display:flex;align-items:center;justify-content:center;color:#c02020;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </div>
+          <div>
+            <div class="modal-title" id="deleteMsgTitle">Delete message pair?</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">This cannot be undone.</div>
+          </div>
+        </div>
+        <button class="btn-header-action" id="deleteMsgCancelBtn" title="Cancel" style="flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="gap:10px;">
+        <p style="font-size:14px;color:var(--text-muted);line-height:1.6;">
+          This will permanently delete <strong>your message</strong> and the <strong>AI reply</strong> that follows it from this conversation.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="deleteMsgCancelBtn2">Cancel</button>
+        <button class="btn-danger" id="deleteMsgConfirmBtn" style="background:linear-gradient(180deg,#f07070 0%,#c02020 55%,#901010 100%);color:#fff;border-color:rgba(255,255,255,0.22);font-weight:700;box-shadow:0 2px 8px rgba(192,32,32,0.38),inset 0 1px 0 rgba(255,255,255,0.32);">
+          Delete pair
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/js/app.js"></script>
 </body>
 </html>
