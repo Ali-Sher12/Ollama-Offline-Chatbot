@@ -2,7 +2,7 @@ import json
 import time
 import httpx
 import logging
-from typing import List, Dict, Any, Generator, Optional
+from typing import List, Dict, Any, Generator, Optional, Tuple
 from app.config import config_manager
 from app.services.analytics_service import analytics_service
 
@@ -35,6 +35,93 @@ ONLINE_MODELS = {
     ]
 }
 
+RECOMMENDED_LOCAL_MODELS = [
+    {
+        "id": "llama3.2:1b",
+        "name": "Llama 3.2 1B",
+        "approx_size": "~1.3 GB",
+        "min_ram_gb": 4,
+        "description": "Ultra-fast general-purpose model. Great for older laptops and quick chats."
+    },
+    {
+        "id": "llama3.2:3b",
+        "name": "Llama 3.2 3B",
+        "approx_size": "~2.0 GB",
+        "min_ram_gb": 8,
+        "description": "Balanced quality and speed for everyday chat, writing, and light coding."
+    },
+    {
+        "id": "llama3.1:8b",
+        "name": "Llama 3.1 8B",
+        "approx_size": "~4.7 GB",
+        "min_ram_gb": 16,
+        "description": "Strong general reasoning and instruction following when you have enough RAM."
+    },
+    {
+        "id": "qwen2.5:3b-instruct",
+        "name": "Qwen 2.5 3B Instruct",
+        "approx_size": "~1.9 GB",
+        "min_ram_gb": 8,
+        "description": "Efficient multilingual assistant with good instruction following."
+    },
+    {
+        "id": "qwen2.5-coder:7b",
+        "name": "Qwen 2.5 Coder 7B",
+        "approx_size": "~4.7 GB",
+        "min_ram_gb": 16,
+        "description": "Specialized coding model for code generation, review, and debugging."
+    },
+    {
+        "id": "deepseek-r1:1.5b",
+        "name": "DeepSeek R1 1.5B",
+        "approx_size": "~1.1 GB",
+        "min_ram_gb": 4,
+        "description": "Small reasoning model that shows its chain of thought."
+    },
+    {
+        "id": "phi3",
+        "name": "Phi-3 Mini",
+        "approx_size": "~2.2 GB",
+        "min_ram_gb": 8,
+        "description": "Compact Microsoft model with strong reasoning for its size."
+    },
+    {
+        "id": "mistral",
+        "name": "Mistral 7B",
+        "approx_size": "~4.1 GB",
+        "min_ram_gb": 16,
+        "description": "Reliable all-round open model for chat and writing."
+    },
+    {
+        "id": "dolphin-mistral",
+        "name": "Dolphin Mistral",
+        "approx_size": "~4.1 GB",
+        "min_ram_gb": 16,
+        "description": "Uncensored Mistral fine-tune for unrestricted local conversations."
+    },
+    {
+        "id": "gemma3",
+        "name": "Gemma 3",
+        "approx_size": "~3.3 GB",
+        "min_ram_gb": 8,
+        "description": "Google's capable lightweight open model."
+    },
+    {
+        "id": "gemma4:e2b",
+        "name": "Gemma 4 E2B",
+        "approx_size": "~5.0 GB",
+        "min_ram_gb": 8,
+        "description": "Newer efficient Gemma model (availability depends on the Ollama registry)."
+    },
+    {
+        "id": "moondream",
+        "name": "Moondream (Vision)",
+        "approx_size": "~1.7 GB",
+        "min_ram_gb": 4,
+        "description": "Tiny vision model for image description, OCR, and screenshot analysis."
+    },
+]
+
 class LLMService:
     def __init__(self):
         pass
@@ -61,28 +148,313 @@ class LLMService:
             logger.debug(f"Could not connect to Ollama: {e}")
         return []
 
+    def check_agent_readiness(self, provider: str, model: str) -> Tuple[bool, str]:
+        """
+        Fast preflight check before starting Agent Mode.
+
+        Returns (ready, error_message). For local Ollama models this verifies
+        that the model is installed and advertises tool-calling support. For
+        cloud providers it verifies that an API key is configured. When a
+        capability endpoint is unavailable, we allow the run to proceed and
+        let the real request surface any error.
+        """
+        provider = (provider or "ollama").strip().lower()
+        model = (model or "").strip()
+
+        if provider == "ollama":
+            ollama_url = config_manager.get("ollama_url", "http://localhost:11434").rstrip("/")
+            try:
+                with httpx.Client(timeout=8.0) as client:
+                    res = client.post(f"{ollama_url}/api/show", json={"model": model})
+                    if res.status_code == 404:
+                        return (
+                            False,
+                            f"Local model '{model}' is not installed. Open the Model Library to download it, "
+                            "or select an installed model.",
+                        )
+                    if res.status_code != 200:
+                        return True, ""
+                    data = res.json() or {}
+                    capabilities = data.get("capabilities")
+                    if isinstance(capabilities, list) and "tools" not in capabilities:
+                        return (
+                            False,
+                            f"Local model '{model}' does not support tool calling, which Agent Mode requires. "
+                            "Choose a tool-capable model such as qwen2.5:1.5b, qwen2.5:3b, or mistral, "
+                            "or turn off Agent Mode.",
+                        )
+            except Exception:
+                return (
+                    False,
+                    f"Cannot reach Ollama at {ollama_url}. Make sure Ollama is running, then try again.",
+                )
+            return True, ""
+
+        if provider in ("openai", "groq", "openrouter", "gemini", "anthropic"):
+            api_keys = config_manager.get("api_keys", {})
+            if not (api_keys.get(provider) or "").strip():
+                display = {
+                    "openai": "OpenAI",
+                    "groq": "Groq",
+                    "openrouter": "OpenRouter",
+                    "gemini": "Google Gemini",
+                    "anthropic": "Anthropic",
+                }.get(provider, provider.capitalize())
+                return (
+                    False,
+                    f"Agent Mode needs an API key for {display}. Add one in Settings, "
+                    "or switch to a local Ollama model.",
+                )
+
+        return True, ""
+
+    def get_recommended_models(self) -> Dict[str, Any]:
+        """Return curated download suggestions annotated with hardware compatibility."""
+        specs = self.get_device_specs()
+        ram_gb = specs.get("total_ram_gb", 8.0)
+        installed_ids = {m.get("id", "") for m in self.get_ollama_models()}
+        # Treat an untagged model and its ':latest' tag as the same model.
+        installed_roots = {mid.split(":")[0] for mid in installed_ids if mid}
+
+        models = []
+        for model in RECOMMENDED_LOCAL_MODELS:
+            model_id = model["id"]
+            is_installed = model_id in installed_ids or (
+                ":" not in model_id and model_id in installed_roots
+            )
+            is_compatible = ram_gb >= model.get("min_ram_gb", 0)
+            models.append({
+                **model,
+                "is_installed": is_installed,
+                "is_compatible": is_compatible,
+                "recommendation_reason": (
+                    f"Fits comfortably in {ram_gb} GB RAM"
+                    if is_compatible
+                    else f"Needs about {model.get('min_ram_gb', 0)} GB RAM (you have {ram_gb} GB)"
+                ),
+            })
+
+        return {
+            "models": models,
+            "device_specs": specs,
+        }
+
+    def pull_ollama_model(self, model_name: str, cancel_event=None) -> Generator[Dict[str, Any], None, None]:
+        """Stream download progress for an Ollama model via the /api/pull endpoint."""
+        model_name = (model_name or "").strip()
+        if not model_name:
+            yield {"type": "error", "error": "Please provide a model name, for example 'llama3.2:3b'."}
+            return
+
+        ollama_url = config_manager.get("ollama_url", "http://localhost:11434")
+        timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        done_sent = False
+
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                with client.stream(
+                    "POST",
+                    f"{ollama_url}/api/pull",
+                    json={"model": model_name, "stream": True}
+                ) as response:
+                    if response.status_code != 200:
+                        body = response.read().decode("utf-8", errors="replace")
+                        yield {
+                            "type": "error",
+                            "model": model_name,
+                            "error": f"Ollama rejected the download ({response.status_code}): {body}"
+                        }
+                        return
+
+                    for line in response.iter_lines():
+                        # Check for cancellation on each chunk
+                        if cancel_event is not None and cancel_event.is_set():
+                            yield {"type": "cancelled", "model": model_name}
+                            return
+
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except Exception:
+                            continue
+
+                        if chunk.get("error"):
+                            yield {"type": "error", "model": model_name, "error": str(chunk["error"])}
+                            return
+
+                        status = chunk.get("status", "")
+                        completed = int(chunk.get("completed") or 0)
+                        total = int(chunk.get("total") or 0)
+                        percent = round((completed / total) * 100, 1) if total > 0 else None
+
+                        yield {
+                            "type": "progress",
+                            "model": model_name,
+                            "status": status,
+                            "completed": completed,
+                            "total": total,
+                            "percent": percent,
+                        }
+
+                        if status == "success":
+                            done_sent = True
+                            yield {"type": "done", "model": model_name, "status": status}
+                            break
+
+            if not done_sent and (cancel_event is None or not cancel_event.is_set()):
+                yield {"type": "done", "model": model_name, "status": "complete"}
+        except Exception as e:
+            yield {
+                "type": "error",
+                "model": model_name,
+                "error": f"Could not download the model. Is Ollama running? ({str(e)})"
+            }
+
+
+    def delete_ollama_model(self, model_name: str) -> Dict[str, Any]:
+        """Delete an installed local Ollama model."""
+        model_name = (model_name or "").strip()
+        if not model_name:
+            return {"success": False, "error": "No model name provided."}
+
+        ollama_url = config_manager.get("ollama_url", "http://localhost:11434")
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.request(
+                    "DELETE",
+                    f"{ollama_url}/api/delete",
+                    json={"model": model_name}
+                )
+                if response.status_code in (200, 204):
+                    return {"success": True, "model": model_name}
+                body = response.text
+                return {
+                    "success": False,
+                    "model": model_name,
+                    "error": f"Ollama could not delete the model ({response.status_code}): {body}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "model": model_name,
+                "error": f"Could not connect to Ollama: {str(e)}"
+            }
+
+    def get_device_specs(self) -> Dict[str, Any]:
+        """Detect system CPU count, total RAM in GB, and compute tier."""
+        import os
+        import platform
+
+        cpu_count = os.cpu_count() or 4
+        ram_gb = 8.0
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if "MemTotal:" in line:
+                        ram_gb = round(int(line.split()[1]) / (1024**2), 1)
+                        break
+        except Exception:
+            pass
+
+        return {
+            "cpu_cores": cpu_count,
+            "cpu_count": cpu_count,
+            "ram_total_gb": ram_gb,
+            "total_ram_gb": ram_gb,
+            "ram_total_bytes": int(ram_gb * (1024**3)),
+            "os": platform.system()
+        }
+
     def get_all_available_models(self) -> Dict[str, Any]:
-        """Aggregate local Ollama models and configured online models."""
-        ollama_models = self.get_ollama_models()
-        is_ollama_online = len(ollama_models) > 0
+        """Aggregate local Ollama models and configured online models with hardware-aware recommendations (⭐)."""
+        specs = self.get_device_specs()
+        ram_gb = specs.get("total_ram_gb", 8.0)
+        cpu_count = specs.get("cpu_count", 4)
+
+        # Local RAM threshold for smooth local inference
+        # On <= 8GB RAM, recommend models <= 3.5GB; on 16GB, recommend <= 8GB
+        max_rec_local_size_gb = 3.8 if ram_gb <= 8.5 else (8.5 if ram_gb <= 16.5 else 20.0)
+
+        raw_ollama_models = self.get_ollama_models()
+        is_ollama_online = len(raw_ollama_models) > 0
+
+        annotated_ollama = []
+        for m in raw_ollama_models:
+            details = m.get("details", {})
+            param_size = details.get("parameter_size", "")
+            # Check model name or size
+            is_rec = False
+            # Check if size fits in RAM comfortably
+            size_str = m.get("name", "")
+            # e.g. "qwen2.5:1.5b (0.92 GB)"
+            import re
+            match = re.search(r"\(([0-9.]+)\s*GB\)", size_str)
+            size_gb = float(match.group(1)) if match else 2.0
+
+            if size_gb <= max_rec_local_size_gb:
+                is_rec = True
+
+            star_prefix = "⭐ " if is_rec else ""
+            rec_note = " (Recommended for your hardware)" if is_rec else ""
+            annotated_ollama.append({
+                "id": m["id"],
+                "name": f"{star_prefix}{m['name']}{rec_note}",
+                "raw_name": m["name"],
+                "provider": "ollama",
+                "is_recommended": is_rec,
+                "recommendation_reason": f"Fits comfortably in {ram_gb} GB RAM without swapping" if is_rec else None,
+                "details": details
+            })
 
         providers = {
             "ollama": {
                 "name": "Local Ollama",
                 "is_online": is_ollama_online,
-                "models": ollama_models
+                "models": annotated_ollama
             }
+        }
+
+        # Online models that are recommended for fast agentic responsiveness
+        recommended_online_ids = {
+            "gemini-2.0-flash",
+            "gpt-4o-mini",
+            "llama-3.3-70b-versatile",
+            "claude-3-5-haiku-20241022"
+        }
+
+        provider_display_names = {
+            "openai": "OpenAI",
+            "anthropic": "Anthropic",
+            "gemini": "Google Gemini",
+            "groq": "Groq",
+            "openrouter": "OpenRouter",
         }
 
         api_keys = config_manager.get("api_keys", {})
         for provider_id, model_list in ONLINE_MODELS.items():
             has_key = bool(api_keys.get(provider_id, "").strip())
+            online_annotated = []
+            for m in model_list:
+                is_rec = m["id"] in recommended_online_ids
+                star_prefix = "⭐ " if is_rec else ""
+                online_annotated.append({
+                    "id": m["id"],
+                    "name": f"{star_prefix}{m['name']}",
+                    "raw_name": m["name"],
+                    "provider": provider_id,
+                    "is_recommended": is_rec,
+                    "recommendation_reason": "Ultra-fast low-latency cloud model (recommended)" if is_rec else None
+                })
+
             providers[provider_id] = {
-                "name": provider_id.capitalize(),
+                "name": provider_display_names.get(provider_id, provider_id.capitalize()),
                 "is_configured": has_key,
-                "models": [{"id": m["id"], "name": m["name"], "provider": provider_id} for m in model_list]
+                "models": online_annotated
             }
 
+        providers["system_specs"] = specs
+        providers["device_specs"] = specs
         return providers
 
     def stream_chat(
