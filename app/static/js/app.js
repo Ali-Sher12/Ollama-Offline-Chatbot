@@ -1438,7 +1438,12 @@
       const res = await fetch('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'New Chat', provider, model })
+        body: JSON.stringify({
+          title: 'New Chat',
+          provider,
+          model,
+          project_id: currentProjectId
+        })
       });
       const newConv = await res.json();
       conversations.unshift(newConv);
@@ -1525,6 +1530,7 @@
 
     messages.forEach((msg) => {
       appendMessageBubble(msg.role, msg.content, {
+        msgId: msg.id,
         attachments: msg.attachments,
         searchResults: msg.search_results,
         promptTokens: msg.prompt_tokens,
@@ -1602,6 +1608,10 @@
 
     row.appendChild(avatar);
     row.appendChild(bubble);
+
+    // ── Delete button (shown on hover, only for messages with an ID) ──────
+    setMessageId(row, meta.msgId);
+
     messagesContainer.appendChild(row);
 
     highlightCodeBlocks(bubble);
@@ -1612,6 +1622,100 @@
   function scrollToBottom() {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
+
+  // --------------------------------------------------------------------------
+  // Delete Message Pair
+  // --------------------------------------------------------------------------
+  let _pendingDeleteMsgId = null;
+  let _pendingDeleteRow   = null;
+
+  // Attach (or update) the persistent DB id for a rendered message row. Rows
+  // are first drawn before the server has saved them, then stamped when the
+  // corresponding SSE event arrives.
+  function setMessageId(row, msgId) {
+    if (!row || !msgId) return;
+    row.dataset.msgId = msgId;
+    if (row.querySelector('.msg-delete-btn')) return;
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'msg-delete-btn';
+    deleteBtn.title = 'Delete this message pair';
+    deleteBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDeleteMsgConfirm(row.dataset.msgId, row);
+    });
+    row.appendChild(deleteBtn);
+  }
+
+  function openDeleteMsgConfirm(msgId, row) {
+    if (isGenerating) {
+      // Deleting the current user turn mid-stream would leave the eventual
+      // assistant reply orphaned in the database.
+      alert('Please wait for the current response to finish before deleting a message.');
+      return;
+    }
+    _pendingDeleteMsgId = msgId;
+    _pendingDeleteRow   = row;
+    const overlay = document.getElementById('deleteMsgOverlay');
+    if (overlay) overlay.classList.add('open');
+  }
+
+  function closeDeleteMsgConfirm() {
+    _pendingDeleteMsgId = null;
+    _pendingDeleteRow   = null;
+    const overlay = document.getElementById('deleteMsgOverlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  async function confirmDeleteMessagePair() {
+    if (!_pendingDeleteMsgId || !currentConversationId) return;
+    const msgId = _pendingDeleteMsgId;
+    const row   = _pendingDeleteRow;
+    closeDeleteMsgConfirm();
+
+    try {
+      const res = await fetch(
+        `/api/conversations/${currentConversationId}/messages/${msgId}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      // Remove every row the server actually deleted (both halves of the pair).
+      const deletedIds = new Set(data.deleted_ids || []);
+      messagesContainer.querySelectorAll('.message-row').forEach((el) => {
+        if (deletedIds.has(el.dataset.msgId)) el.remove();
+      });
+
+      // Safety net for rows that were rendered before their id was known.
+      if (row && row.parentNode) row.remove();
+
+      if (!messagesContainer.querySelector('.message-row')) {
+        renderMessages([]);
+      }
+    } catch (err) {
+      console.error('Failed to delete message pair:', err);
+      alert('Failed to delete message: ' + err.message);
+    }
+  }
+
+  // Wire up delete-message-pair modal buttons after DOM is ready
+  window.addEventListener('DOMContentLoaded', () => {
+    const confirmBtn = document.getElementById('deleteMsgConfirmBtn');
+    const cancelBtns = [
+      document.getElementById('deleteMsgCancelBtn'),
+      document.getElementById('deleteMsgCancelBtn2')
+    ];
+    const overlay    = document.getElementById('deleteMsgOverlay');
+    if (confirmBtn) confirmBtn.addEventListener('click', confirmDeleteMessagePair);
+    cancelBtns.forEach((btn) => {
+      if (btn) btn.addEventListener('click', closeDeleteMsgConfirm);
+    });
+    if (overlay)    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDeleteMsgConfirm();
+    });
+  });
 
   // --------------------------------------------------------------------------
   // File Attachments (Plus Icon)
