@@ -2115,6 +2115,151 @@
   }
 
   // --------------------------------------------------------------------------
+  // Agent Permission Approval
+  // --------------------------------------------------------------------------
+  function setPermissionButtonsDisabled(disabled) {
+    [btnDenyPermission, btnAlwaysAllowPermission, btnAllowPermission].forEach((btn) => {
+      if (btn) btn.disabled = disabled;
+    });
+  }
+
+  function setPermissionToolCardState(callId, state) {
+    if (!callId) return;
+    const card = document.getElementById(`tool-${callId}`);
+    if (!card) return;
+
+    const pill = card.querySelector('.tool-duration-pill');
+    card.classList.toggle('permission-waiting', state === 'waiting');
+
+    if (!pill) return;
+    if (state === 'waiting') {
+      pill.textContent = 'waiting for approval...';
+    } else if (state === 'allow') {
+      pill.textContent = 'executing...';
+    } else if (state === 'deny') {
+      pill.textContent = 'denied';
+    } else if (state === 'timeout') {
+      pill.textContent = 'timed out';
+    } else if (state === 'cancelled') {
+      pill.textContent = 'cancelled';
+    }
+  }
+
+  function enqueuePermissionRequest(event) {
+    if (!event || !event.request_id) return;
+    setPermissionToolCardState(event.call_id, 'waiting');
+    permissionQueue.push(event);
+    showNextPermissionRequest();
+  }
+
+  function showNextPermissionRequest() {
+    if (activePermissionRequest || permissionResponding) return;
+
+    const next = permissionQueue.shift();
+    if (!next) {
+      permissionModal.classList.remove('open');
+      return;
+    }
+
+    activePermissionRequest = next;
+    const details = next.details || {};
+    const toolName = next.tool_name || 'tool';
+    const risk = String(details.risk || 'medium').toLowerCase();
+    const safeRisk = ['low', 'medium', 'high'].includes(risk) ? risk : 'medium';
+
+    permissionSubtitle.textContent = `The agent is paused before using ${toolName}.`;
+    permissionToolName.textContent = toolName;
+    permissionTitle.textContent = details.title || `Run ${toolName}`;
+    permissionDetail.textContent = details.detail || '';
+    permissionRisk.className = `permission-risk ${safeRisk}`;
+    permissionRisk.textContent = `${safeRisk} risk`;
+
+    const preview = details.preview || '';
+    if (preview) {
+      permissionPreviewWrapper.style.display = '';
+      permissionPreviewLabel.textContent = details.preview_label || 'Details';
+      permissionPreview.textContent = preview;
+    } else {
+      permissionPreviewWrapper.style.display = 'none';
+      permissionPreviewLabel.textContent = '';
+      permissionPreview.textContent = '';
+    }
+
+    setPermissionButtonsDisabled(false);
+    permissionModal.classList.add('open');
+  }
+
+  async function respondToPermission(decision) {
+    if (!activePermissionRequest || permissionResponding) return;
+
+    permissionResponding = true;
+    setPermissionButtonsDisabled(true);
+    const requestId = activePermissionRequest.request_id;
+
+    try {
+      const res = await fetch(`/api/agent/permission/${encodeURIComponent(requestId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision })
+      });
+
+      // A 404 means the request timed out or was already resolved elsewhere.
+      if (!res.ok && res.status !== 404) {
+        let detail = `Server returned ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data && data.detail) detail = data.detail;
+        } catch (_) {}
+        throw new Error(detail);
+      }
+
+      permissionResponding = false;
+      activePermissionRequest = null;
+      permissionModal.classList.remove('open');
+      setPermissionButtonsDisabled(false);
+      showNextPermissionRequest();
+    } catch (e) {
+      permissionResponding = false;
+      setPermissionButtonsDisabled(false);
+      alert('Could not send permission decision: ' + e.message);
+    }
+  }
+
+  function handlePermissionResolved(event) {
+    if (!event || !event.request_id) return;
+
+    const decision = String(event.decision || 'deny');
+    const cardState = ['allow', 'always_allow', 'allow_all'].includes(decision)
+      ? 'allow'
+      : decision;
+    setPermissionToolCardState(event.call_id, cardState);
+
+    permissionQueue = permissionQueue.filter((req) => req.request_id !== event.request_id);
+
+    if (activePermissionRequest && activePermissionRequest.request_id === event.request_id) {
+      permissionResponding = false;
+      activePermissionRequest = null;
+      permissionModal.classList.remove('open');
+      setPermissionButtonsDisabled(false);
+      showNextPermissionRequest();
+    }
+  }
+
+  function clearPermissionPrompts() {
+    const outstanding = [activePermissionRequest, ...permissionQueue];
+    outstanding.forEach((request) => {
+      if (request && request.call_id) {
+        setPermissionToolCardState(request.call_id, 'cancelled');
+      }
+    });
+    permissionQueue = [];
+    activePermissionRequest = null;
+    permissionResponding = false;
+    setPermissionButtonsDisabled(false);
+    permissionModal.classList.remove('open');
+  }
+
+  // --------------------------------------------------------------------------
   // Settings & Analytics
   // --------------------------------------------------------------------------
   async function loadSettings() {
