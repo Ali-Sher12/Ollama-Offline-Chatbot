@@ -301,8 +301,48 @@
         </div>
 
         <div class="form-group">
+          <label class="form-label">Vision Provider / Model (Optional)</label>
+          <input type="text" id="settingVisionModel" class="form-input" placeholder="e.g. gemini-2.0-flash or llama3.2-vision (Auto if blank)">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Keep Local Model Loaded</label>
+          <select id="settingKeepAlive" class="form-input">
+            <option value="5m">5 minutes</option>
+            <option value="10m">10 minutes</option>
+            <option value="30m">30 minutes</option>
+            <option value="45m">45 minutes</option>
+            <option value="60m">60 minutes</option>
+            <option value="-1">No limit (keep in memory)</option>
+          </select>
+          <div class="form-hint">How long Ollama keeps the model in RAM after a response.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Agent Workspace Directory</label>
+          <input type="text" id="settingAgentWorkspace" class="form-input" placeholder="Project root directory">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Agent Permissions</label>
+          <select id="settingAgentPermissionMode" class="form-input">
+            <option value="allow_all">Allow All — run tools without asking</option>
+            <option value="always_ask">Always Ask — approve commands and file changes</option>
+          </select>
+          <div class="form-hint">Always Ask pauses the agent before terminal commands and file modifications; read-only file inspection is allowed automatically. Allow All runs tools immediately, while catastrophic commands remain blocked.</div>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">Token Budget Limit (e.g. 100,000)</label>
           <input type="number" id="settingTokenBudget" class="form-input" placeholder="100000">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Web Search Results Count: <span id="webSearchCountDisplay">10</span></label>
+          <input type="range" id="settingWebSearchCount" min="5" max="20" step="1" value="10"
+                 style="width:100%;accent-color:var(--primary);"
+                 oninput="document.getElementById('webSearchCountDisplay').textContent=this.value">
+          <div class="form-hint">How many web search results the AI retrieves per query (5–20). More results = richer context but slightly slower.</div>
         </div>
       </div>
       <div class="modal-footer">
