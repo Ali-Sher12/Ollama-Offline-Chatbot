@@ -233,7 +233,12 @@ async def create_conversation(req: CreateConversationRequest):
     """Create a new conversation session."""
     provider = req.provider or config_manager.get("selected_provider", "ollama")
     model = req.model or config_manager.get("selected_model", "llama3.2:1b")
-    conv = db.create_conversation(title=req.title or "New Chat", provider=provider, model=model)
+    conv = db.create_conversation(
+        title=req.title or "New Chat",
+        provider=provider,
+        model=model,
+        project_id=req.project_id
+    )
     return conv
 
 
