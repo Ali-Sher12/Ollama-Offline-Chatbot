@@ -383,52 +383,179 @@ async def chat_endpoint(req: ChatRequest):
     )
     history_messages.append({"role": "user", "content": augmented_prompt})
 
+    # 4. Check if Agent Mode is active
+    if req.agent_mode:
+        def agent_event_generator():
+            accumulated_response = ""
+            agent_errors: List[str] = []
+            # Tell the UI which DB row anchors the user side of this turn so it
+            # can offer delete-message-pair straight away (without a reload).
+            yield f"data: {json.dumps({'type': 'user_message', 'conversation_id': req.conversation_id, 'message_id': user_message['id']})}\n\n"
+            try:
+                for event in agent_orchestrator.run_agent_stream(
+                    objective=req.message,
+                    conversation_id=req.conversation_id,
+                    provider=provider,
+                    model=model,
+                    attachments=req.attachments,
+                    history=conv.get("messages", []) if should_append else None,
+                    project_id=project_id
+                ):
+                    event_type = event.get("type")
+                    if event_type == "chunk":
+                        accumulated_response += event.get("content", "")
+                    elif event_type == "error":
+                        agent_errors.append(event.get("error") or "Unknown agent error")
+                    elif event_type == "done":
+                        status = event.get("status", "unknown")
+                        error_text = event.get("error") or (
+                            agent_errors[-1] if agent_errors else ""
+                        )
+
+                        if status == "completed":
+                            final_ans = event.get("final_answer") or accumulated_response or "Task completed."
+                        elif status == "cancelled":
+                            final_ans = "Agent task was cancelled."
+                        elif status == "max_iterations_reached":
+                            final_ans = event.get("final_answer") or accumulated_response or (
+                                "Agent reached the configured step limit before finishing."
+                            )
+                        else:
+                            final_ans = "Agent task failed before completion."
+                            if error_text:
+                                final_ans += f"\n\n{error_text}"
+                            if accumulated_response:
+                                final_ans += f"\n\nPartial output:\n{accumulated_response}"
+
+                        # Send the resolved message/status to the UI as well as the DB.
+                        event["status"] = status
+                        event["error"] = error_text or None
+                        event["final_answer"] = final_ans
+
+                        # Save assistant message to DB
+                        assistant_message = db.add_message(
+                            conversation_id=req.conversation_id,
+                            role="assistant",
+                            content=final_ans,
+                            prompt_tokens=event.get("prompt_tokens", 0),
+                            completion_tokens=event.get("completion_tokens", 0),
+                            duration_sec=event.get("duration_sec", 0.0)
+                        )
+                        event["message_id"] = assistant_message["id"]
+                        # Record analytics
+                        db.record_analytics(
+                            conversation_id=req.conversation_id,
+                            provider=provider,
+                            model=model,
+                            prompt_tokens=event.get("prompt_tokens", 0),
+                            completion_tokens=event.get("completion_tokens", 0),
+                            estimated_cost=event.get("estimated_cost", 0.0)
+                        )
+                        # Fetch updated budget status
+                        summary = db.get_analytics_summary()
+                        grand_total = summary["overall"].get("grand_total_tokens", 0)
+                        budget_limit = config_manager.get("token_budget_limit", 100000)
+                        budget_status = analytics_service.get_budget_status(grand_total, budget_limit)
+                        event["budget_status"] = budget_status
+
+                    yield f"data: {json.dumps(event)}\n\n"
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                err_event = {"type": "error", "error": f"Agent execution error: {str(e)}"}
+                yield f"data: {json.dumps(err_event)}\n\n"
+
+        return StreamingResponse(agent_event_generator(), media_type="text/event-stream")
+
     def event_generator():
         accumulated_response = ""
         last_metrics = None
+
+        # Tell the UI which DB row anchors the user side of this turn so it can
+        # offer delete-message-pair straight away (without a reload).
+        yield f"data: {json.dumps({'type': 'user_message', 'conversation_id': req.conversation_id, 'message_id': user_message['id']})}\n\n"
 
         # First emit search results if any
         if search_results:
             yield f"data: {json.dumps({'type': 'search_results', 'results': search_results})}\n\n"
 
-        for event in llm_service.stream_chat(history_messages, provider=provider, model=model):
-            event_type = event.get("type")
-            if event_type == "chunk":
-                accumulated_response += event.get("content", "")
-                yield f"data: {json.dumps(event)}\n\n"
-            elif event_type == "done":
-                last_metrics = event
-                # Save assistant message to DB
-                db.add_message(
-                    conversation_id=req.conversation_id,
-                    role="assistant",
-                    content=accumulated_response,
-                    prompt_tokens=event.get("prompt_tokens", 0),
-                    completion_tokens=event.get("completion_tokens", 0),
-                    duration_sec=event.get("duration_sec", 0.0)
-                )
-                # Record in analytics table
-                db.record_analytics(
-                    conversation_id=req.conversation_id,
-                    provider=provider,
-                    model=model,
-                    prompt_tokens=event.get("prompt_tokens", 0),
-                    completion_tokens=event.get("completion_tokens", 0),
-                    estimated_cost=event.get("estimated_cost", 0.0)
-                )
+        try:
+            for event in llm_service.stream_chat(
+                history_messages,
+                provider=provider,
+                model=model,
+                keep_alive=config_manager.get("keep_alive", "30m")
+            ):
+                event_type = event.get("type")
+                if event_type == "chunk":
+                    accumulated_response += event.get("content", "")
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "done":
+                    last_metrics = event
+                    # Save assistant message to DB
+                    assistant_message = db.add_message(
+                        conversation_id=req.conversation_id,
+                        role="assistant",
+                        content=accumulated_response,
+                        prompt_tokens=event.get("prompt_tokens", 0),
+                        completion_tokens=event.get("completion_tokens", 0),
+                        duration_sec=event.get("duration_sec", 0.0)
+                    )
+                    event["message_id"] = assistant_message["id"]
+                    # Record in analytics table
+                    db.record_analytics(
+                        conversation_id=req.conversation_id,
+                        provider=provider,
+                        model=model,
+                        prompt_tokens=event.get("prompt_tokens", 0),
+                        completion_tokens=event.get("completion_tokens", 0),
+                        estimated_cost=event.get("estimated_cost", 0.0)
+                    )
 
-                # Fetch updated budget status
-                summary = db.get_analytics_summary()
-                grand_total = summary["overall"].get("grand_total_tokens", 0)
-                budget_limit = config_manager.get("token_budget_limit", 100000)
-                budget_status = analytics_service.get_budget_status(grand_total, budget_limit)
-                event["budget_status"] = budget_status
+                    # Fetch updated budget status
+                    summary = db.get_analytics_summary()
+                    grand_total = summary["overall"].get("grand_total_tokens", 0)
+                    budget_limit = config_manager.get("token_budget_limit", 100000)
+                    budget_status = analytics_service.get_budget_status(grand_total, budget_limit)
+                    event["budget_status"] = budget_status
 
-                yield f"data: {json.dumps(event)}\n\n"
-            elif event_type == "error":
-                yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "error":
+                    yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            err_event = {"type": "error", "error": f"Stream error: {str(e)}"}
+            yield f"data: {json.dumps(err_event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/api/agent/cancel/{task_id}")
+async def cancel_agent_task(task_id: str):
+    """Cancel an active autonomous agent task."""
+    cancelled = agent_orchestrator.cancel_task(task_id)
+    return {"status": "ok", "cancelled": cancelled}
+
+
+@app.post("/api/agent/permission/{request_id}")
+async def resolve_agent_permission(request_id: str, req: PermissionDecisionRequest):
+    """Resolve a pending Agent Mode permission request (allow, deny, always_allow)."""
+    decision = (req.decision or "").strip().lower()
+    if decision not in ("allow", "deny", "always_allow"):
+        raise HTTPException(status_code=400, detail="Invalid permission decision")
+    resolved = permission_broker.resolve(request_id, decision)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Permission request not found or already resolved")
+    return {"status": "ok", "request_id": request_id, "decision": decision}
+
+
+@app.get("/api/agent/tools")
+async def list_agent_tools():
+    """List all registered agent tools and schemas."""
+    return {
+        "count": len(tool_registry.list_tool_names()),
+        "names": tool_registry.list_tool_names(),
+        "tools": tool_registry.get_tool_definitions()
+    }
 
 
 @app.get("/api/settings")
