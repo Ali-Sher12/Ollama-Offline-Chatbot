@@ -599,6 +599,18 @@ async def get_analytics():
 
 
 # Static files and root UI
+@app.middleware("http")
+async def no_cache_ui_assets(request, call_next):
+    """Serve the UI and its assets fresh so CSS/JS updates appear immediately."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
